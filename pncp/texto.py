@@ -104,6 +104,33 @@ def carregar_tfidf(caminho_saida=None):
     }
 
 
+def selecao_chi2(top_k=10_000, caminho_saida=None):
+    """
+    Reduz o vocabulário TF-IDF para os top-K termos com maior chi² em
+    relação ao rótulo. Inspirado no Cap. 6 (Aggarwal & Zhai) — feature
+    selection de filtro para texto.
+
+    Útil quando max_features=50k está estourando RAM; chi² escolhe os
+    termos mais discriminativos antes de descartar o resto.
+    """
+    from sklearn.feature_selection import SelectKBest, chi2
+
+    if caminho_saida is None:
+        caminho_saida = config.caminho(config.SUB_P2)
+    art = carregar_tfidf()
+    X, y = art["X"], art["labels"]["rotulo"].astype(str).values
+
+    seletor = SelectKBest(chi2, k=min(top_k, X.shape[1]))
+    X_red = seletor.fit_transform(X, y)
+    print(f"[texto] chi²: {X.shape[1]:,} → {X_red.shape[1]:,} features")
+
+    from pncp.io_disco import salvar_sparse, salvar_modelo
+    salvar_sparse(X_red, caminho_saida / "X_chi2.npz")
+    salvar_modelo(seletor, caminho_saida / "seletor_chi2.joblib")
+    liberar(X, X_red, art)
+    return caminho_saida
+
+
 def marcar_termos_dominio(caminho_parquet):
     """
     Conta ocorrências dos termos de engenharia em cada objeto.

@@ -150,15 +150,86 @@ um deles — tudo é parquet em disco, sem estado vivo entre células.
 
 ---
 
-## Referências teóricas (capítulos de Han, Kamber & Pei)
+## Referências teóricas — mapeamento técnica × capítulo
 
-- Cap. 6 (Aggarwal & Zhai): Survey de Classificação de Texto — embasa
-  TF-IDF, Naive Bayes, SVM, KNN aplicados a texto.
-- Cap. 7: Classificação avançada (SVM, Bayesian networks, regras) —
-  embasa a escolha de Logística + RF + LinearSVC.
-- Cap. 9: Cluster analysis avançado — embasa LDA, KMeans, hierárquico.
-- Cap. 10: Deep Learning — embasa BERTimbau / Sentence-BERT.
-- Cap. 11: **Outlier Detection** — embasa o módulo `pncp.outliers`
-  (IsolationForest e LOF para detectar suspeitos contextuais).
-- Cap. 5 + 12: Pattern Mining e Trends — embasam Apriori e a
-  análise de subenquadramento como caso de "fraud detection" textual.
+Cada técnica do pipeline tem fundamentação direta nos capítulos do
+livro Han, Kamber & Pei (Data Mining: Concepts and Techniques) +
+Aggarwal & Zhai (Mining Text Data, Cap. 6).
+
+### Cap. 6 (Aggarwal & Zhai) — Text Classification Survey
+- **TF-IDF + 1,2-grams** (`pncp.texto.construir_tfidf`)
+- **Feature selection por Chi²** (`pncp.texto.selecao_chi2`) — top-K
+  termos mais discriminativos antes de descartar o vocabulário restante
+- **Logística / SVM linear / Naive Bayes** sobre TF-IDF
+  (`pncp.classificacao`)
+
+### Cap. 7 — Classification: Advanced Methods
+- **7.1 Feature selection (filter)** → `selecao_chi2`
+- **7.3 Linear SVM** → `LinearSVC` em `classificacao`
+- **7.4.4 Associative classification** → `pncp.avancado.apriori` gera
+  regras que podem ser usadas como classificador (CBA-style)
+- **7.5.1 Semi-supervised** → `pncp.avancado.label_propagation`
+- **7.5.2 Active Learning (uncertainty sampling)** →
+  `pncp.classificacao.amostra_active_learning` — escolhe os 50
+  contratos mais informativos (não os mais óbvios) para revisão humana
+- **7.5.4 Distant Supervision** → `pncp.triagem` formaliza isto: a
+  triagem determinística produz rótulos fracos para os ambíguos
+- **7.7.3 Interpretability** → top features do LR + SHAP/LIME
+  (recomendação de extensão futura)
+
+### Cap. 9 — Cluster Analysis: Advanced
+- **9.1.3 EM / GMM** → `pncp.avancado.gmm` — soft clustering com
+  probabilidade de pertinência por cluster (vs. KMeans hard)
+- **9.4.2 NMF** → tópicos via NMF (presente no original, mantido como
+  alternativa ao LDA)
+- **9.5.2 SimRank / Personalized PageRank** → `pncp.grafos.pagerank`
+- **9.6 Semi-supervised clustering** → motivação para LP
+
+### Cap. 10 — Deep Learning
+- **10.1–10.2 Backprop, dropout, cross-entropy** → fundamentação para
+  `pncp.embeddings` (BERTimbau / SBERT)
+
+### Cap. 11 — Outlier Detection
+- **11.2.1 Univariate (Z-score, IQR, Grubb's test)** →
+  `pncp.outliers.zscore_valor` no campo `valor` do contrato
+- **11.3.2 Density-based (LOF)** → `pncp.outliers.lof`
+- **11.5.2 Classification-based (One-Class SVM)** →
+  `pncp.outliers.one_class_svm`
+- **11.6 Contextual outliers** → justifica treinar IsolationForest
+  apenas no cluster 'geral' (cap 11.6.1: transformar contextual
+  outlier em conventional via condicionamento no contexto)
+- **11.7.3 Outlier Detection Ensemble** →
+  `pncp.outliers.ensemble` — min-max normalize + média/máximo entre
+  IsolationForest + LOF + OCSVM
+
+### Cap. 5 — Pattern Mining: Advanced
+- **5.1.5 Negative / rare patterns** → contratos óbvios + rotulo
+  errado são padrões raros (motivação da triagem)
+- **5.4 Sequential patterns (PrefixSpan)** → extensão futura: padrões
+  temporais por órgão (sequência de contratos do mesmo órgão ao longo
+  dos anos)
+
+### Cap. 12 — Trends and Frontiers
+- **12.1.1 Mining text data** → embasamento geral
+- **12.2.2 Truth discovery** → motivação para combinar sinais
+  contraditórios (Camada 1 texto, Camada 2 PDF, CNAE) — extensão futura
+  via modelo Bayesiano (Cap. 7.2)
+- **12.3.1 Structuring unstructured data** → `pncp.pdfs` faz
+  exatamente isso: extrai marcadores estruturados de PDFs livres
+- **12.3.3 Correlation vs causality** → discussão de limitações do TCC
+
+---
+
+## Resumo executivo das técnicas adicionadas (post-leitura dos PDFs)
+
+| Técnica nova | Módulo | Cap. fonte | Para que serve |
+|---|---|---|---|
+| Triagem (regex+rito) | `triagem` | 7.5.4 distant sup. | Reclassifica óbvios antes do ML |
+| Chi² feature selection | `texto` | 6, 7.1.1 | Reduz vocab para os termos discriminativos |
+| Active learning | `classificacao` | 7.5.2 | Escolhe 50 contratos *mais informativos* p/ revisão |
+| Calibração Platt/Isotonic | `classificacao` | 6 (Aggarwal) | Probabilidades fiéis ao threshold 0.5 |
+| GMM (EM) | `avancado` | 9.1.3 | Soft clustering: contratos "no meio" eng↔geral |
+| One-Class SVM | `outliers` | 11.5.2 | 3º detector de anomalias no cluster geral |
+| IQR + Z-score (valor) | `outliers` | 11.2.1 | Outlier univariado simples e pedagógico |
+| Ensemble de outliers | `outliers` | 11.7.3 | Combina IsolationForest+LOF+OCSVM |
+| PageRank no grafo | `grafos` | 9.5.2 | Fornecedores estruturalmente importantes |

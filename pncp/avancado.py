@@ -223,10 +223,44 @@ def smote_balancear():
     return saida
 
 
+# ── GMM / EM: soft clustering ────────────────────────────────────────────────
+def gmm(n_componentes=3):
+    """
+    Gaussian Mixture Model treinado via EM (Cap. 9.1.3, Han/Kamber/Pei).
+    Diferente do KMeans: cada contrato recebe **probabilidade** de
+    pertencer a cada cluster — permite identificar contratos "no meio
+    do caminho" entre 'geral' e 'engenharia'.
+    """
+    from sklearn.mixture import GaussianMixture
+    from sklearn.decomposition import TruncatedSVD
+
+    art = carregar_tfidf()
+    X = TruncatedSVD(n_components=50, random_state=config.SEED).fit_transform(art["X"])
+    X = X.astype("float32")
+
+    gm = GaussianMixture(n_components=n_componentes, random_state=config.SEED,
+                          covariance_type="diag", max_iter=200)
+    gm.fit(X)
+    proba = gm.predict_proba(X).astype("float32")
+
+    # Salva probas + rótulo original; permite cruzamento downstream
+    rotulos = art["labels"]["rotulo"].astype(str).values
+    out = pd.DataFrame(proba, columns=[f"prob_cluster_{i}" for i in range(n_componentes)])
+    out["rotulo"] = rotulos
+    out["entropia"] = -(proba * np.log(proba + 1e-12)).sum(axis=1).astype("float32")
+
+    saida = config.caminho(config.SUB_P3, "gmm.parquet")
+    salvar_parquet(out, saida)
+    print(f"[avancado] GMM/EM com {n_componentes} componentes → {saida}")
+    liberar(X, gm, art)
+    return saida
+
+
 # ── Pipeline completo (chama tudo ligado por padrão) ─────────────────────────
 @com_gc
 def executar(fazer_lda=True, fazer_lp=True, fazer_apriori=True,
-             fazer_kmeans=True, fazer_hier=True, fazer_smote=False):
+             fazer_kmeans=True, fazer_hier=True, fazer_gmm=True,
+             fazer_smote=False):
     """Roda todas as técnicas avançadas (cada uma é opt-in)."""
     monitorar_ram("início avancado")
     saidas = {}
@@ -240,6 +274,8 @@ def executar(fazer_lda=True, fazer_lp=True, fazer_apriori=True,
         saidas["kmeans"] = str(kmeans())
     if fazer_hier:
         saidas["hierarquico"] = str(hierarquico_suspeitos())
+    if fazer_gmm:
+        saidas["gmm"] = str(gmm())
     if fazer_smote:
         saidas["smote"] = str(smote_balancear())
     salvar_json(saidas, config.caminho(config.SUB_P3, "indice.json"))

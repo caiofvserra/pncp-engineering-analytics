@@ -72,6 +72,17 @@ def centralidade(G, top_n=20):
     return {"top_degree": deg.to_dict(), "top_betweenness": bw.to_dict()}
 
 
+def pagerank(G, top_n=20):
+    """
+    PageRank no grafo bipartido (Cap. 9.5.2, Han/Kamber/Pei). Mede
+    importância estrutural — fornecedores com PageRank alto têm muitos
+    órgãos parceiros e/ou parceiros importantes. Útil para cruzar com
+    'red flags': PageRank baixo + objeto eng + rotulo geral = suspeito.
+    """
+    pr = nx.pagerank(G, alpha=0.85, max_iter=200)
+    return (pd.Series(pr).sort_values(ascending=False).head(top_n).to_dict())
+
+
 def comunidades_louvain(G):
     """Comunidades via Louvain (python-louvain)."""
     try:

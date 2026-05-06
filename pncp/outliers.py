@@ -117,10 +117,140 @@ def lof(n_neighbors=20, contaminacao=0.05, max_amostras=20000):
 
 
 @com_gc
-def executar(fazer_iforest=True, fazer_lof=False):
+def one_class_svm(nu=0.05, kernel="rbf"):
+    """
+    One-Class SVM (Cap. 11.5.2). Treina apenas em "normais" do cluster
+    'geral' e marca como outlier qualquer ponto fora da fronteira.
+    Mais sensível que IsolationForest em texto-derivado.
+    """
+    from sklearn.svm import OneClassSVM
+
+    art = carregar_tfidf()
+    X = _reduzir_dim(art["X"], n=50)
+    rotulos = art["labels"]["rotulo"].astype(str).values
+    mask_geral = rotulos == "geral"
+    if mask_geral.sum() < 100:
+        return None
+
+    # Subsample (OCSVM é O(n²))
+    rng = np.random.default_rng(config.SEED)
+    treino = rng.choice(np.where(mask_geral)[0],
+                          size=min(5000, mask_geral.sum()), replace=False)
+    svm = OneClassSVM(nu=nu, kernel=kernel, gamma="scale")
+    svm.fit(X[treino])
+    score = svm.score_samples(X)
+
+    out = pd.DataFrame({"rotulo": rotulos,
+                        "score_anomalia_ocsvm": score.astype("float32")})
+    saida = config.caminho("outliers", "scores_ocsvm.parquet")
+    salvar_parquet(out, saida)
+    print(f"[outliers] One-Class SVM rodado")
+    liberar(art, X, svm)
+    return saida
+
+
+def zscore_valor(caminho_parquet=None, limiar_z=3.0):
+    """
+    Detecção univariada (Cap. 11.2.1, Han/Kamber/Pei).
+    Usa Z-score no `valor` por categoria — contratos rotulados 'geral'
+    com valor anormalmente alto dentro do próprio rótulo são flag.
+    Também aplica regra do IQR (>Q3+1.5×IQR).
+    """
+    if caminho_parquet is None:
+        caminho_parquet = config.caminho(config.SUB_COLETA, "contratos.parquet")
+    df = ler_parquet(caminho_parquet,
+                     colunas=["numeroControlePNCP", "rotulo", "valor"])
+    if "valor" not in df.columns:
+        print("[outliers] coluna 'valor' ausente — pulando z-score")
+        return None
+
+    g = df[df["rotulo"] == "geral"].copy()
+    g["valor"] = pd.to_numeric(g["valor"], errors="coerce")
+    g = g.dropna(subset=["valor"])
+
+    mu, sigma = g["valor"].mean(), g["valor"].std()
+    g["zscore_valor"] = (g["valor"] - mu) / max(sigma, 1e-9)
+
+    q1, q3 = g["valor"].quantile([0.25, 0.75])
+    iqr = q3 - q1
+    g["acima_iqr"] = g["valor"] > (q3 + 1.5 * iqr)
+    g["outlier_z"] = g["zscore_valor"].abs() >= limiar_z
+
+    saida = config.caminho("outliers", "valor_outliers.parquet")
+    salvar_parquet(g[g["outlier_z"] | g["acima_iqr"]], saida)
+    salvar_json({
+        "media": float(mu), "desvio": float(sigma),
+        "Q1": float(q1), "Q3": float(q3), "IQR": float(iqr),
+        "n_outlier_z": int(g["outlier_z"].sum()),
+        "n_acima_iqr": int(g["acima_iqr"].sum()),
+    }, config.caminho("outliers", "resumo_valor.json"))
+    print(f"[outliers] valor: {int(g['outlier_z'].sum())} z-outliers, "
+          f"{int(g['acima_iqr'].sum())} acima do IQR")
+    liberar(df, g)
+    return saida
+
+
+@com_gc
+def ensemble():
+    """
+    Ensemble de detectores (Cap. 11.7.3): combina IsolationForest + LOF +
+    OCSVM via min-max normalization + média. Um contrato é "outlier
+    consenso" se aparece nos top-K de pelo menos 2 detectores.
+    """
+    paths = {
+        "iforest": config.caminho("outliers", "scores_iforest.parquet"),
+        "lof": config.caminho("outliers", "scores_lof.parquet"),
+        "ocsvm": config.caminho("outliers", "scores_ocsvm.parquet"),
+    }
+    tabelas = {}
+    for nome, p in paths.items():
+        if Path(p).exists():
+            tabelas[nome] = ler_parquet(p)
+    if len(tabelas) < 2:
+        print("[outliers] ensemble precisa de ≥2 detectores rodados")
+        return None
+
+    # Min-max normalize cada score (quanto menor o original, mais outlier;
+    # convertemos para 'maior = mais outlier' para a média).
+    def norm(serie):
+        s = -serie  # inverte
+        s = (s - s.min()) / (s.max() - s.min() + 1e-12)
+        return s
+
+    base = None
+    for nome, tab in tabelas.items():
+        col = [c for c in tab.columns if c.startswith("score_anomalia_")][0]
+        tab = tab[["rotulo", col]].rename(columns={col: nome}).reset_index(drop=True)
+        tab[nome] = norm(tab[nome])
+        base = tab if base is None else pd.concat([base, tab[[nome]]], axis=1)
+
+    cols_score = [c for c in tabelas.keys() if c in base.columns]
+    base["score_ensemble_media"] = base[cols_score].mean(axis=1)
+    base["score_ensemble_max"] = base[cols_score].max(axis=1)
+    saida = config.caminho("outliers", "ensemble.parquet")
+    salvar_parquet(base, saida)
+    print(f"[outliers] ensemble com {len(cols_score)} detectores")
+    return saida
+
+
+# ── Imports tardios para Path ────────────────────────────────────────────────
+from pathlib import Path  # noqa: E402
+
+
+@com_gc
+def executar(fazer_iforest=True, fazer_lof=False, fazer_ocsvm=True,
+             fazer_zscore=True, fazer_ensemble=True):
     saidas = {}
     if fazer_iforest:
         saidas["iforest"] = str(isolation_forest())
     if fazer_lof:
         saidas["lof"] = str(lof())
+    if fazer_ocsvm:
+        saidas["ocsvm"] = str(one_class_svm())
+    if fazer_zscore:
+        saidas["zscore_valor"] = str(zscore_valor())
+    if fazer_ensemble:
+        ens = ensemble()
+        if ens:
+            saidas["ensemble"] = str(ens)
     return saidas
