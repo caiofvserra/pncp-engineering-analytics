@@ -125,6 +125,55 @@ def _grid_search_lr(X_tr, y_tr):
     return grid.best_estimator_, grid.best_params_, float(grid.best_score_)
 
 
+# ── Active learning: escolhe contratos mais informativos para revisão ──────
+def amostra_active_learning(modelo, X, df_meta, n=50, estrategia="incerteza"):
+    """
+    Inspirado no Cap. 7.5.2 (Active Learning, Han/Kamber/Pei).
+
+    Em vez de pegar os top-N pelo score (=mais óbvios), pega os N mais
+    INFORMATIVOS para revisão humana. Estratégias:
+
+      - 'incerteza': uncertainty sampling — predições com prob mais
+        próxima de 0.5 (modelo está em dúvida).
+      - 'margem': diferença pequena entre top-1 e top-2 classes.
+      - 'entropia': entropia das probabilidades — alta entropia = incerto.
+
+    Retorna DataFrame ordenado por incerteza (mais informativo primeiro).
+    """
+    if not hasattr(modelo, "predict_proba"):
+        return pd.DataFrame()
+    proba = modelo.predict_proba(X)
+
+    if estrategia == "incerteza":
+        # Para cada amostra, pega a prob máxima; quanto menor, mais incerto.
+        score = -proba.max(axis=1)
+    elif estrategia == "margem":
+        ord_ = np.sort(proba, axis=1)
+        score = -(ord_[:, -1] - ord_[:, -2])  # menor margem = mais incerto
+    else:  # entropia
+        score = -(-(proba * np.log(proba + 1e-12)).sum(axis=1))
+
+    out = df_meta.copy()
+    out["score_incerteza"] = score.astype("float32")
+    # Foca em 'geral' (que é o cluster com risco de subenquadramento)
+    if "rotulo" in out.columns:
+        out = out[out["rotulo"] == "geral"]
+    return out.sort_values("score_incerteza", ascending=False).head(n)
+
+
+# ── Calibração de probabilidades ───────────────────────────────────────────
+def calibrar(modelo, X_tr, y_tr, metodo="isotonic"):
+    """
+    Calibra as probabilidades do modelo (Platt sigmoid ou Isotonic).
+    Importante quando vamos usar threshold (0.5 etc.) — sem calibração,
+    o threshold pode estar deslocado.
+    """
+    from sklearn.calibration import CalibratedClassifierCV
+    cal = CalibratedClassifierCV(modelo, method=metodo, cv="prefit")
+    cal.fit(X_tr, y_tr)
+    return cal
+
+
 # ── Ranking de suspeitos ─────────────────────────────────────────────────────
 def _gerar_ranking(modelo, X, df_meta):
     """Para os contratos rotulados 'geral', ordena pela prob de 'engenharia'."""
@@ -212,6 +261,11 @@ def executar(caminho_parquet=None,
                                    "valor", "categoria_id"])
     ranking = _gerar_ranking(modelos[melhor], X, df_meta)
     salvar_parquet(ranking.head(5000), saida / "ranking.parquet")
+
+    # Amostra para revisão humana via active learning (uncertainty sampling)
+    incertos = amostra_active_learning(modelos[melhor], X, df_meta, n=50)
+    if not incertos.empty:
+        salvar_parquet(incertos, saida / "amostra_active_learning.parquet")
 
     # Persiste modelos e métricas
     for nome, m in modelos.items():

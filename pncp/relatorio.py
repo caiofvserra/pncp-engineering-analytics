@@ -31,11 +31,29 @@ def _ler_se_existe(caminho, eh_json=False):
     return ler_json(p) if eh_json else ler_parquet(p)
 
 
+# ── Triagem (etapa 0) ────────────────────────────────────────────────────────
+def integrar_triagem(base):
+    """Adiciona ao DataFrame as colunas da triagem se já existirem em disco."""
+    triagem = _ler_se_existe(config.caminho("triagem", "triagem.parquet"))
+    if triagem is None:
+        return base
+    cols = [c for c in ("numeroControlePNCP", "classificacao_triagem",
+                          "eh_obvio_engenharia", "n_sinais_rito",
+                          "seguiu_rito")
+            if c in triagem.columns]
+    if "numeroControlePNCP" not in cols:
+        return base
+    return base.merge(triagem[cols], on="numeroControlePNCP", how="left")
+
+
 # ── Consolidação ─────────────────────────────────────────────────────────────
 @com_gc
 def consolidar():
     """Junta sinais de todas as etapas num único parquet de suspeitos."""
     base = ler_parquet(config.caminho(config.SUB_COLETA, "contratos.parquet"))
+
+    # Etapa 0 — triagem determinística (pré-filtro + verificação de rito)
+    base = integrar_triagem(base)
 
     # Camada 1 — ranking de probabilidades
     rank = _ler_se_existe(config.caminho(config.SUB_P2, "ranking.parquet"))
@@ -83,6 +101,21 @@ def consolidar():
 
     saida = config.caminho(config.SUB_P9, "suspeitos_consolidados.parquet")
     salvar_parquet(suspeitos.head(2000), saida)
+
+    # Veredito final por contrato — combina triagem (determinística) + ML
+    if "classificacao_triagem" in suspeitos.columns:
+        # Para os 'ambiguos' da triagem, decide pelo n_sinais do ML
+        veredito = suspeitos["classificacao_triagem"].copy()
+        massa_ambigua = veredito == "ambiguo"
+        if "n_sinais" in suspeitos.columns:
+            forte = massa_ambigua & (suspeitos["n_sinais"] >= 2)
+            fraco = massa_ambigua & (suspeitos["n_sinais"] < 2)
+            veredito.loc[forte] = "subenquadramento_provavel_ml"
+            veredito.loc[fraco] = "provavel_geral_real"
+        suspeitos["veredito_final"] = veredito
+        salvar_parquet(suspeitos.head(2000),
+                       config.caminho(config.SUB_P9,
+                                       "suspeitos_consolidados.parquet"))
     print(f"[relatorio] consolidado: {len(suspeitos)} 'geral' avaliados")
     liberar(base)
     return saida
@@ -126,6 +159,8 @@ def gerar_markdown():
                                 eh_json=True) or {}
     eda = _ler_se_existe(config.caminho(config.SUB_EDA, "relatorio.json"),
                           eh_json=True) or {}
+    triagem = _ler_se_existe(config.caminho("triagem", "resumo.json"),
+                              eh_json=True) or {}
     grafos = _ler_se_existe(config.caminho(config.SUB_P7, "resumo.json"),
                               eh_json=True) or {}
     cnae = _ler_se_existe(config.caminho(config.SUB_P8, "resumo.json"),
@@ -148,9 +183,31 @@ def gerar_markdown():
     for k, v in stats["distribuicao"].items():
         linhas.append(f"- **{k}**: {v:,}")
 
+    if triagem:
+        linhas += [
+            "",
+            "## 2. Triagem determinística (etapa 0)",
+            "",
+            f"- Contratos 'geral' óbvios de engenharia: "
+            f"**{triagem.get('n_geral_obvio', 0)}**",
+            "",
+            "Distribuição final da triagem:",
+        ]
+        for k, v in (triagem.get("distribuicao_triagem") or {}).items():
+            linhas.append(f"- `{k}`: {v:,}")
+        linhas += [
+            "",
+            "Interpretação:",
+            "- `subenquadramento_real`: óbvio engenharia + rito não seguido → "
+            "**provável violação da Lei 14.133/2021**",
+            "- `rotulacao_incorreta_processo_ok`: óbvio engenharia + rito "
+            "seguido → erro de cadastro, mas processo correto",
+            "- `ambiguo`: precisa de classificador ML (ver seção 3)",
+        ]
+
     linhas += [
         "",
-        "## 2. Classificação supervisionada (Camada 1)",
+        "## 3. Classificação supervisionada (ML — para os ambíguos)",
         "",
         f"- Melhor modelo: **{melhor}**",
         f"- F1-engenharia (holdout): **{f1_eng:.4f}**",
@@ -252,6 +309,18 @@ GLOSSARIO = {
                      "lista oficial de 702 CNAEs de atividades de engenharia.",
     "Lei 14.133/2021": "Nova Lei de Licitações. Define categorias 7 (obras), "
                          "8 (serviços gerais) e 9 (serviços de engenharia).",
+    "Rito de engenharia": "Conjunto de exigências formais para um contrato de "
+                            "engenharia: ART/RRT, projeto básico/executivo, memorial "
+                            "descritivo, engenheiro responsável, normas ABNT NBR.",
+    "ART": "Anotação de Responsabilidade Técnica — emitida pelo CREA. "
+            "Obrigatória para qualquer obra/serviço de engenharia.",
+    "RRT": "Registro de Responsabilidade Técnica — equivalente da ART para "
+            "arquitetos (CAU).",
+    "Subenquadramento real": "Contrato de engenharia rotulado como 'serviços "
+                                "gerais' E que não seguiu o rito formal. Viola "
+                                "a Lei 14.133/2021.",
+    "Outlier (anomalia)": "Contrato com características muito distintas dos seus "
+                            "pares no cluster 'geral'. Candidato a subenquadramento.",
 }
 
 
