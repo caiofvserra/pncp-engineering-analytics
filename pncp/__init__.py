@@ -35,7 +35,9 @@ __version__ = "1.0.0"
 
 _LAZY = {
     "config", "io_disco", "ram",
-    "coleta", "texto", "eda", "classificacao", "avancado",
+    "coleta", "texto", "eda",
+    "triagem", "outliers",
+    "classificacao", "avancado",
     "embeddings", "grafos", "cnae", "pdfs", "aditivos", "relatorio",
     "spark_extras",
 }
