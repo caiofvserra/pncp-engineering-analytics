@@ -106,19 +106,29 @@ def keep_alive():
     """
     Injeta JavaScript no Colab para evitar desconexão por inatividade.
 
-    Estratégia em duas camadas:
-      1. Clica no botão de conectar a cada 60s (aciona heartbeat do runtime)
-      2. Simula scroll/clique em elementos invisíveis a cada 30s para
-         indicar atividade humana ao watchdog do Colab
+    Estratégia em três camadas — necessária quando o usuário trabalha em
+    outra janela (PowerAutomate, outro navegador) e a aba do Colab fica
+    em segundo plano:
 
-    Não impede o limite duro de 12h em sessões free, mas evita desconexão
-    por idle de ~30-90min que costuma cortar coletas longas.
+      1. Clica `colab-connect-button` a cada 60s (heartbeat oficial)
+      2. Dispara `mousemove` a cada 30s (sinaliza atividade humana)
+      3. Toca um oscilador Web Audio inaudível continuamente — isto
+         IMPEDE o navegador de aplicar throttling à aba em background
+         (Chrome/Firefox não suspendem timers de abas que tocam áudio).
+
+    A camada 3 é o que faz a diferença quando você não está olhando
+    para o Colab. Limites:
+      - Não escapa do timeout duro de 12h (free)
+      - Se o navegador inteiro for fechado, perde tudo
+
+    Quando isso falhar, a retomada automática de pncp.coleta.coletar()
+    permite continuar do ponto exato onde parou.
     """
     try:
         from IPython.display import display, Javascript
         display(Javascript("""
             (function(){
-              // Camada 1: aperta o botão de conectar (heartbeat oficial)
+              // Camada 1: heartbeat oficial do Colab
               setInterval(function(){
                 const b = document.querySelector("colab-connect-button");
                 if (b && typeof b.click === "function") b.click();
@@ -130,9 +140,25 @@ def keep_alive():
                   {bubbles:true, clientX: Math.random()*5, clientY: Math.random()*5}));
               }, 30000);
 
-              console.log("[pncp] keep-alive ativado (60s + 30s)");
+              // Camada 3: áudio inaudível — impede o navegador de
+              // suspender a aba quando ela está em background
+              try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                gain.gain.value = 0.0001;            // praticamente mudo
+                osc.frequency.value = 440;
+                osc.connect(gain).connect(ctx.destination);
+                osc.start();
+                window._pncpKeepAliveAudio = {ctx, osc, gain};
+                console.log("[pncp] keep-alive 3 camadas ativado");
+              } catch(e) {
+                console.log("[pncp] WebAudio não disponível: " + e.message);
+              }
             })();
         """))
-        print("[colab] keep-alive ativado (heartbeat 60s + atividade 30s)")
+        print("[colab] keep-alive ativado (heartbeat 60s + atividade 30s "
+              "+ WebAudio anti-throttle)")
+        print("        ⚠ mantenha a aba do Colab aberta (mesmo em outra janela)")
     except Exception as e:
         print(f"[colab] keep-alive não pôde ser ativado: {e}")
