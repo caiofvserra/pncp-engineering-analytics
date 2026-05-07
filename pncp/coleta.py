@@ -177,9 +177,26 @@ def limpar(df_raw):
     return df
 
 
-# ── Path do checkpoint ───────────────────────────────────────────────────────
+def _salvar_checkpoint(chk_path, todos):
+    """Salva os registros coletados (em RAM) como parquet checkpoint."""
+    if not todos:
+        return
+    try:
+        df = pd.DataFrame(todos).drop_duplicates(subset=["numeroControlePNCP"])
+        salvar_parquet(df, chk_path)
+        print(f"   💾 checkpoint: {chk_path.name} ({len(df):,} regs)")
+    except Exception as e:
+        print(f"   ⚠ falha no checkpoint: {e}")
+
+
+# ── Path do checkpoint e progresso ──────────────────────────────────────────
 def _path_checkpoint(uf, ano_ini, ano_fim):
     nome = f"checkpoint_{uf}_{ano_ini}_{ano_fim}.parquet"
+    return config.caminho(config.SUB_COLETA, nome)
+
+
+def _path_progresso(uf, ano_ini, ano_fim):
+    nome = f"progresso_{uf}_{ano_ini}_{ano_fim}.json"
     return config.caminho(config.SUB_COLETA, nome)
 
 
@@ -188,21 +205,71 @@ def _path_consolidado(uf=None):
     return config.caminho(config.SUB_COLETA, nome)
 
 
+def _ler_progresso(path):
+    """Estado de progresso. Estrutura:
+        {"meses_completos": ["2024-01", ...],
+         "ultimo_parcial":  {"mes": "2024-05", "ultima_pagina": 12, "registros": 5874}}
+    """
+    if path.exists():
+        try:
+            import json
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {"meses_completos": [], "ultimo_parcial": None}
+
+
+def _salvar_progresso(path, prog):
+    import json
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(prog, ensure_ascii=False, indent=2),
+                     encoding="utf-8")
+
+
+def status(uf, anos):
+    """Mostra o estado atual da coleta — quais meses prontos e qual parcial."""
+    if isinstance(anos, int):
+        anos = [anos]
+    anos = sorted(list(anos))
+    ano_ini, ano_fim = anos[0], anos[-1]
+    prog = _ler_progresso(_path_progresso(uf, ano_ini, ano_fim))
+    chk = _path_checkpoint(uf, ano_ini, ano_fim)
+
+    print(f"\n📊 Status coleta {uf} {ano_ini}-{ano_fim}")
+    print(f"   meses completos: {len(prog['meses_completos'])}")
+    if prog["meses_completos"]:
+        print(f"     {prog['meses_completos']}")
+    if prog["ultimo_parcial"]:
+        p = prog["ultimo_parcial"]
+        print(f"   parcial: {p['mes']} (página {p['ultima_pagina']}, "
+              f"{p.get('registros', 0):,} regs)")
+    if chk.exists():
+        df = pd.read_parquet(chk)
+        print(f"   checkpoint: {len(df):,} registros em {chk.name}")
+    else:
+        print(f"   checkpoint: ainda não existe")
+    return prog
+
+
 # ── Coleta principal ─────────────────────────────────────────────────────────
 def coletar(uf, anos, mes_inicio=1, mes_fim=12, max_paginas=200, tamanho=500):
     """
-    Coleta contratos via /v1/contratos, mês a mês, com checkpoint mensal.
+    Coleta contratos via /v1/contratos, mês a mês, com retomada automática.
+
+    Pode chamar várias vezes com os MESMOS parâmetros — a função verifica
+    o que já está salvo e só baixa o que falta:
+      - Pula meses que já estão marcados como completos
+      - Retoma o último mês parcial da página seguinte à última salva
 
     Args:
-        uf: sigla da UF para filtro pós-download (ex: 'SP')
-        anos: int (ano único) ou iterável de anos (ex: range(2023, 2026))
-        mes_inicio, mes_fim: limites mensais (aplicados aos anos das pontas)
-        max_paginas: limite de páginas por mês (200 = até 100k registros/mês)
-        tamanho: registros por página (máx 500 — limite da API)
+        uf: UF para filtro pós-download (ex: 'SP')
+        anos: int ou iterável (ex: range(2024, 2027))
+        mes_inicio, mes_fim: limites mensais aplicados aos anos das pontas
+        max_paginas: limite por mês (200 ≈ 100k regs/mês)
+        tamanho: registros por página (máx 500)
 
     Returns:
-        Path do parquet final consolidado e limpo.
-        Em caso de falha total na coleta, retorna None.
+        Path do parquet consolidado limpo, ou None se nada foi baixado.
     """
     monitorar_ram("início coleta")
 
@@ -222,31 +289,52 @@ def coletar(uf, anos, mes_inicio=1, mes_fim=12, max_paginas=200, tamanho=500):
     print(f"\n🔎 Coleta PNCP — {uf} | {ano_ini}-{ano_fim}  "
           f"({len(pares)} meses)")
 
-    todos = []
     chk_path = _path_checkpoint(uf, ano_ini, ano_fim)
+    prog_path = _path_progresso(uf, ano_ini, ano_fim)
+    prog = _ler_progresso(prog_path)
+    meses_completos = set(prog["meses_completos"])
+    parcial = prog["ultimo_parcial"]
 
-    # Retoma de checkpoint se existir
+    todos = []
     if chk_path.exists():
         try:
             anteriores = pd.read_parquet(chk_path)
             todos = anteriores.to_dict("records")
-            print(f"   ↻ retomando de checkpoint ({len(todos):,} registros já)")
+            print(f"   ↻ checkpoint encontrado: {len(todos):,} registros já salvos")
         except Exception:
             todos = []
 
+    if meses_completos:
+        print(f"   ✓ {len(meses_completos)} mês(es) já completos — pulando")
+    if parcial:
+        print(f"   ↻ {parcial['mes']} parcial: vai retomar da página "
+              f"{parcial['ultima_pagina'] + 1}")
+
     for (a, mes) in tqdm(pares, desc="📅 Meses", unit="mês"):
+        chave = f"{a}-{mes:02d}"
+        if chave in meses_completos:
+            continue
+
         d_ini = datetime.date(a, mes, 1).strftime("%Y%m%d")
         if mes < 12:
-            d_fim = (datetime.date(a, mes + 1, 1) - datetime.timedelta(days=1))
+            d_fim = datetime.date(a, mes + 1, 1) - datetime.timedelta(days=1)
         else:
             d_fim = datetime.date(a, 12, 31)
         d_fim = d_fim.strftime("%Y%m%d")
 
-        print(f"\n── {a}-{mes:02d} ({d_ini} → {d_fim}) ──")
+        # Determina página inicial — retoma o parcial se for o mês atual
+        pag_inicio = 1
+        if parcial and parcial["mes"] == chave:
+            pag_inicio = int(parcial["ultima_pagina"]) + 1
+            print(f"\n── {chave} ({d_ini} → {d_fim}) RETOMANDO da pág {pag_inicio} ──")
+        else:
+            print(f"\n── {chave} ({d_ini} → {d_fim}) ──")
+
         reg_mes = 0
         falhas_seguidas = 0
+        mes_terminou_natural = False
 
-        for pag in range(1, max_paginas + 1):
+        for pag in range(pag_inicio, max_paginas + 1):
             params = {
                 "dataInicial": d_ini,
                 "dataFinal": d_fim,
@@ -265,6 +353,7 @@ def coletar(uf, anos, mes_inicio=1, mes_fim=12, max_paginas=200, tamanho=500):
 
             if r.status_code == 204:
                 print(f"   ✓ pág {pag} 204 — fim do mês")
+                mes_terminou_natural = True
                 break
 
             try:
@@ -277,30 +366,45 @@ def coletar(uf, anos, mes_inicio=1, mes_fim=12, max_paginas=200, tamanho=500):
                           else payload if isinstance(payload, list) else [])
             if not registros:
                 print(f"   ✓ pág {pag} vazia — fim do mês")
+                mes_terminou_natural = True
                 break
 
             todos.extend(_aplanar(r) for r in registros)
             reg_mes += len(registros)
             falhas_seguidas = 0
             print(f"   → pág {pag:3d}: +{len(registros):4d} (acum: {len(todos):,})")
-            # Página parcial = última. API só preenche < tamanho na última página.
+
+            # Atualiza progresso parcial após cada página bem-sucedida
+            parcial = {"mes": chave, "ultima_pagina": pag, "registros": reg_mes}
+
+            # Checkpoint a cada 10 páginas (parquet + progresso)
+            if pag % 10 == 0:
+                _salvar_checkpoint(chk_path, todos)
+                _salvar_progresso(prog_path, {
+                    "meses_completos": sorted(meses_completos),
+                    "ultimo_parcial": parcial,
+                })
+
+            # Página parcial = última (API só preenche < tamanho no fim)
             if len(registros) < tamanho:
                 print(f"   ✓ pág {pag} parcial — fim do mês")
+                mes_terminou_natural = True
                 break
             time.sleep(config.PAUSA_PAGINA)
 
-        print(f"   {a}-{mes:02d}: {reg_mes:,} registros")
+        # Marca mês como completo se terminou naturalmente
+        if mes_terminou_natural:
+            meses_completos.add(chave)
+            parcial = None
 
-        # Checkpoint mensal
-        if todos:
-            df_chk = (pd.DataFrame(todos)
-                      .drop_duplicates(subset=["numeroControlePNCP"]))
-            try:
-                salvar_parquet(df_chk, chk_path)
-                print(f"   💾 checkpoint: {chk_path.name} "
-                      f"({len(df_chk):,} regs)")
-            except Exception as e:
-                print(f"   ⚠ falha no checkpoint: {e}")
+        # Salva checkpoint e progresso ao fim do mês
+        _salvar_checkpoint(chk_path, todos)
+        _salvar_progresso(prog_path, {
+            "meses_completos": sorted(meses_completos),
+            "ultimo_parcial": parcial,
+        })
+        print(f"   {chave}: {reg_mes:,} registros (mês "
+              f"{'completo' if mes_terminou_natural else 'PARCIAL'})")
 
     if not todos:
         print("[coleta] nada baixado — verifique conexão e parâmetros")

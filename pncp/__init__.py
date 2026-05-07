@@ -103,16 +103,36 @@ def atualizar(branch="refactor", repo_dir="/content/pncp-engineering-analytics")
 
 
 def keep_alive():
-    """Injeta JS no Colab para evitar desconexão por inatividade (~12h)."""
+    """
+    Injeta JavaScript no Colab para evitar desconexão por inatividade.
+
+    Estratégia em duas camadas:
+      1. Clica no botão de conectar a cada 60s (aciona heartbeat do runtime)
+      2. Simula scroll/clique em elementos invisíveis a cada 30s para
+         indicar atividade humana ao watchdog do Colab
+
+    Não impede o limite duro de 12h em sessões free, mas evita desconexão
+    por idle de ~30-90min que costuma cortar coletas longas.
+    """
     try:
         from IPython.display import display, Javascript
         display(Javascript("""
-            function keepAlive() {
-              const btn = document.querySelector("colab-connect-button");
-              if (btn) btn.click();
-            }
-            setInterval(keepAlive, 60000);
+            (function(){
+              // Camada 1: aperta o botão de conectar (heartbeat oficial)
+              setInterval(function(){
+                const b = document.querySelector("colab-connect-button");
+                if (b && typeof b.click === "function") b.click();
+              }, 60000);
+
+              // Camada 2: simula atividade do usuário
+              setInterval(function(){
+                document.dispatchEvent(new MouseEvent("mousemove",
+                  {bubbles:true, clientX: Math.random()*5, clientY: Math.random()*5}));
+              }, 30000);
+
+              console.log("[pncp] keep-alive ativado (60s + 30s)");
+            })();
         """))
-        print("[colab] keep-alive ativado")
-    except Exception:
-        pass
+        print("[colab] keep-alive ativado (heartbeat 60s + atividade 30s)")
+    except Exception as e:
+        print(f"[colab] keep-alive não pôde ser ativado: {e}")
