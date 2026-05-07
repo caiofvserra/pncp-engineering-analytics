@@ -190,7 +190,27 @@ def executar(caminho_parquet=None):
     salvar_json(resumo, config.caminho("triagem", "resumo.json"))
     print(f"[triagem] {resumo['distribuicao_triagem']}")
     liberar(df)
+    mostrar()
     return saida
+
+
+def mostrar():
+    """Resumo da triagem: óbvios, sinais de rito, distribuição final."""
+    from pncp.io_disco import ler_json
+    p = config.caminho("triagem", "resumo.json")
+    if not p.exists():
+        print("[triagem.mostrar] rode pncp.triagem.executar() primeiro")
+        return
+    r = ler_json(p)
+    print(f"\n🔎 Triagem — {r['n_total']:,} contratos")
+    print(f"   óbvios de engenharia (rotulo='geral'): {r['n_geral_obvio']}")
+    print(f"   classificação:")
+    for k, v in r["distribuicao_triagem"].items():
+        print(f"     {k}: {v:,}")
+    if r.get("padrao_obvio_top"):
+        print(f"\n   padrões mais frequentes:")
+        for padrao, n in list(r["padrao_obvio_top"].items())[:5]:
+            print(f"     {n:4d}× {padrao[:60]}")
 
 
 def listar_para_ml(caminho_triagem=None):

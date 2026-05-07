@@ -283,6 +283,10 @@ def coletar(uf, anos, mes_inicio=1, mes_fim=12, max_paginas=200, tamanho=500):
             reg_mes += len(registros)
             falhas_seguidas = 0
             print(f"   → pág {pag:3d}: +{len(registros):4d} (acum: {len(todos):,})")
+            # Página parcial = última. API só preenche < tamanho na última página.
+            if len(registros) < tamanho:
+                print(f"   ✓ pág {pag} parcial — fim do mês")
+                break
             time.sleep(config.PAUSA_PAGINA)
 
         print(f"   {a}-{mes:02d}: {reg_mes:,} registros")

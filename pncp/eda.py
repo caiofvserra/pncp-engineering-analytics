@@ -11,6 +11,7 @@ import matplotlib
 matplotlib.use("Agg")  # backend sem display, evita travar Colab
 import matplotlib.pyplot as plt
 import pandas as pd
+from pathlib import Path
 
 from pncp import config
 from pncp.io_disco import ler_parquet, salvar_json
@@ -61,10 +62,10 @@ def _grafico_termos(df, n=20):
     return _salvar_fig(fig, "03_top_termos.png")
 
 
-def executar(caminho_parquet=None):
+def executar(caminho_parquet=None, mostrar_inline=True):
     """
     Lê o parquet de coleta, gera gráficos e relatorio.json.
-    Retorna dict com paths salvos.
+    Retorna dict com paths salvos. Se mostrar_inline=True, renderiza no Colab.
     """
     if caminho_parquet is None:
         caminho_parquet = config.caminho(config.SUB_COLETA, "contratos.parquet")
@@ -72,10 +73,16 @@ def executar(caminho_parquet=None):
     df = ler_parquet(caminho_parquet)
     print(f"[eda] {len(df):,} contratos")
 
+    # Converte chaves para tipos JSON-safe (Int16/Int64 nullable não serializa
+    # como chave de dict — converte para str ou int padrão).
+    def _safe_dict(serie):
+        return {str(k): int(v) for k, v in serie.items()}
+
     relatorio = {
         "n_contratos": int(len(df)),
-        "rotulos": df["rotulo"].value_counts().to_dict(),
-        "anos": (df["anoPublicacao"].value_counts().sort_index().to_dict()
+        "rotulos": _safe_dict(df["rotulo"].value_counts()),
+        "anos": (_safe_dict(df["anoPublicacao"].dropna().astype(int)
+                              .value_counts().sort_index())
                  if "anoPublicacao" in df.columns else {}),
         "valor_total_estimado": (float(df["valor"].sum())
                                  if "valor" in df.columns else None),
@@ -90,8 +97,11 @@ def executar(caminho_parquet=None):
         relatorio["graficos"]["termos"] = str(g_tr)
 
     # Detecta viés temporal: se há ano com >70% de "geral", recomenda filtro
-    if "anoPublicacao" in df.columns:
-        por_ano = df.groupby("anoPublicacao")["rotulo"].value_counts(normalize=True)
+    if "anoPublicacao" in df.columns and df["anoPublicacao"].notna().any():
+        df_tmp = df[df["anoPublicacao"].notna()].copy()
+        df_tmp["anoPublicacao"] = df_tmp["anoPublicacao"].astype(int)
+        por_ano = df_tmp.groupby("anoPublicacao")["rotulo"] \
+                         .value_counts(normalize=True)
         suspeitos = por_ano[por_ano.index.get_level_values("rotulo") == "geral"]
         suspeitos = suspeitos[suspeitos > 0.7]
         if len(suspeitos):
@@ -104,4 +114,33 @@ def executar(caminho_parquet=None):
     saida = salvar_json(relatorio, config.caminho(config.SUB_EDA, "relatorio.json"))
     print(f"[eda] relatório em {saida}")
     liberar(df)
+    if mostrar_inline:
+        mostrar()
     return relatorio
+
+
+def mostrar():
+    """Renderiza inline os PNGs e o JSON resumo do EDA (use no Colab)."""
+    try:
+        from IPython.display import Image, display
+    except ImportError:
+        Image = display = None
+
+    from pncp.io_disco import ler_json
+    rel_path = config.caminho(config.SUB_EDA, "relatorio.json")
+    if not rel_path.exists():
+        print("[eda.mostrar] rode pncp.eda.executar() primeiro")
+        return
+    rel = ler_json(rel_path)
+    print(f"\n📊 EDA — {rel['n_contratos']:,} contratos")
+    print(f"   rótulos: {rel.get('rotulos')}")
+    print(f"   anos: {rel.get('anos')}")
+    if "alerta_temporal" in rel:
+        print(f"   ⚠ {rel['alerta_temporal']['mensagem']}")
+    if display is None:
+        print("   (IPython não disponível — gráficos ficam só em disco)")
+        return
+    for nome, p in (rel.get("graficos") or {}).items():
+        if Path(p).exists():
+            print(f"\n— {nome} —")
+            display(Image(p))

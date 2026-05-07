@@ -275,4 +275,36 @@ def executar(caminho_parquet=None,
 
     liberar(X, modelos, df_meta, ranking)
     monitorar_ram("fim clf")
+    mostrar()
     return saida
+
+
+def mostrar():
+    """Imprime resumo das métricas + matriz de confusão do melhor modelo."""
+    from pncp.io_disco import ler_json
+    p = config.caminho(config.SUB_P2, "metricas.json")
+    if not p.exists():
+        print("[clf.mostrar] rode pncp.classificacao.executar() primeiro")
+        return
+    m = ler_json(p)
+    melhor = m.get("melhor_modelo", "?")
+    print(f"\n📈 Classificação — melhor modelo: {melhor}")
+    if "holdout" in m and melhor in m["holdout"]:
+        h = m["holdout"][melhor]
+        print(f"   F1-engenharia (holdout): {h.get('f1_engenharia', 0):.4f}")
+        print(f"   F1-macro:                {h.get('f1_macro', 0):.4f}")
+    if "bootstrap" in m and melhor in m["bootstrap"]:
+        ic = m["bootstrap"][melhor].get("f1_eng_ic95")
+        if ic:
+            print(f"   IC 95%: [{ic[0]:.3f}, {ic[1]:.3f}]")
+    if "mcnemar_lr_vs_rf" in m:
+        print(f"   McNemar LR vs RF: p={m['mcnemar_lr_vs_rf'].get('p_valor', 0):.4f}")
+    rk = config.caminho(config.SUB_P2, "ranking.parquet")
+    if rk.exists():
+        from pncp.io_disco import ler_parquet
+        r = ler_parquet(rk).head(10)
+        print(f"\n   Top-10 suspeitos (rotulo='geral' com maior prob_engenharia):")
+        for _, row in r.iterrows():
+            txt = str(row.get("objeto", ""))[:80]
+            prob = row.get("prob_engenharia", 0)
+            print(f"   • [{prob:.3f}] {txt}")

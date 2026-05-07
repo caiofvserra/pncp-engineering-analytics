@@ -30,6 +30,7 @@ PyMuPDF quando você de fato chama `pncp.embeddings.executar()`.
 """
 
 import importlib
+from pathlib import Path
 
 __version__ = "1.0.0"
 
@@ -57,16 +58,48 @@ def __dir__():
 
 
 # ── Helpers Colab ────────────────────────────────────────────────────────────
-def montar_drive(pasta="/content/drive/MyDrive/PNCP_TCC"):
-    """Monta o Google Drive e configura PASTA_DADOS para `pasta/dados`."""
+def montar_drive(pasta="/content/drive/MyDrive/PNCP_TCC", force=True):
+    """
+    Monta o Google Drive e configura PASTA_DADOS para `pasta/dados`.
+
+    `force=True` (padrão) refaz a montagem mesmo se o Colab achar que já
+    está montado — resolve estados quebrados de sessões anteriores.
+    Não apaga nem reescreve nenhum arquivo do Drive: só refaz a conexão.
+    """
     from google.colab import drive
-    drive.mount("/content/drive", force_remount=False)
+    drive.mount("/content/drive", force_remount=force)
     from pncp import config
     from pathlib import Path
     config.PASTA_DADOS = Path(pasta) / "dados"
     config.PASTA_DADOS.mkdir(parents=True, exist_ok=True)
     print(f"[drive] PASTA_DADOS = {config.PASTA_DADOS}")
     return config.PASTA_DADOS
+
+
+def atualizar(branch="refactor", repo_dir="/content/pncp-engineering-analytics"):
+    """
+    Faz git fetch + reset --hard na branch e recarrega o módulo `pncp`
+    em memória. Use no INÍCIO de qualquer célula quando suspeitar que o
+    código pode ter mudado no GitHub.
+
+    Após chamar isso, é preciso fazer `import pncp` de novo na célula
+    para usar a versão recarregada.
+    """
+    import subprocess, sys
+    if not Path(repo_dir).exists():
+        print(f"[atualizar] {repo_dir} não existe — clone primeiro")
+        return
+    subprocess.run(["git", "-C", repo_dir, "fetch", "origin"], check=True)
+    subprocess.run(["git", "-C", repo_dir, "checkout", branch], check=False)
+    subprocess.run(["git", "-C", repo_dir, "reset", "--hard",
+                    f"origin/{branch}"], check=True)
+    out = subprocess.run(["git", "-C", repo_dir, "log", "-1", "--oneline"],
+                         capture_output=True, text=True).stdout.strip()
+    # Limpa o módulo da memória
+    for mod in [m for m in list(sys.modules) if m.startswith("pncp")]:
+        del sys.modules[mod]
+    print(f"[atualizar] commit ativo: {out}")
+    print(f"[atualizar] rode `import pncp` de novo na célula")
 
 
 def keep_alive():
