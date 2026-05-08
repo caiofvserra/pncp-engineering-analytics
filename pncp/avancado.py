@@ -262,6 +262,10 @@ def executar(fazer_lda=True, fazer_lp=True, fazer_apriori=True,
              fazer_kmeans=True, fazer_hier=True, fazer_gmm=True,
              fazer_smote=False):
     """Roda todas as técnicas avançadas (cada uma é opt-in)."""
+    from pncp.ram import precisa_de
+    if not precisa_de(config.caminho(config.SUB_P2, "X.npz"), "avancado",
+                       "rode pncp.texto.construir_tfidf(...) primeiro"):
+        return None
     monitorar_ram("início avancado")
     saidas = {}
     if fazer_lda:

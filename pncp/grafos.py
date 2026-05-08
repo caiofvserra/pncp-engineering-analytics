@@ -137,9 +137,16 @@ def visualizar(G, top_n=50, nome="grafo.png"):
 
 @com_gc
 def executar(caminho_parquet=None):
+    from pncp.ram import precisa_de
     if caminho_parquet is None:
         caminho_parquet = config.caminho(config.SUB_COLETA, "contratos.parquet")
+    if not precisa_de(caminho_parquet, "grafos",
+                       "rode pncp.coleta.coletar(...) primeiro"):
+        return None
     df = ler_parquet(caminho_parquet)
+    if df.empty:
+        print("[grafos] parquet vazio — pulando")
+        return None
 
     G_bip = construir_bipartido(df)
     if len(G_bip) == 0:

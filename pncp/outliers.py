@@ -240,6 +240,10 @@ from pathlib import Path  # noqa: E402
 @com_gc
 def executar(fazer_iforest=True, fazer_lof=False, fazer_ocsvm=True,
              fazer_zscore=True, fazer_ensemble=True):
+    from pncp.ram import precisa_de
+    if not precisa_de(config.caminho(config.SUB_P2, "X.npz"), "outliers",
+                       "rode pncp.texto.construir_tfidf(...) primeiro"):
+        return None
     saidas = {}
     if fazer_iforest:
         saidas["iforest"] = str(isolation_forest())

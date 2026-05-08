@@ -202,14 +202,20 @@ def executar(caminho_parquet=None,
     Pipeline completo: TF-IDF (carregado do disco) → treino → avaliação →
     ranking → persistência.
     """
+    from pncp.ram import precisa_de
     if caminho_parquet is None:
         caminho_parquet = config.caminho(config.SUB_COLETA, "contratos.parquet")
+
+    saida = config.caminho(config.SUB_P2)
+    tfidf_X = saida / "X.npz"
+    if not precisa_de(tfidf_X, "classificacao",
+                       "rode pncp.texto.construir_tfidf(...) primeiro"):
+        return None
 
     monitorar_ram("início clf")
     artefatos = carregar_tfidf()
     X = artefatos["X"]
     y = artefatos["labels"]["rotulo"].astype(str).values
-    saida = config.caminho(config.SUB_P2)
 
     metricas = {}
 

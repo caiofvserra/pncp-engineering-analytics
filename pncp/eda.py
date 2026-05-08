@@ -66,11 +66,21 @@ def executar(caminho_parquet=None, mostrar_inline=True):
     """
     Lê o parquet de coleta, gera gráficos e relatorio.json.
     Retorna dict com paths salvos. Se mostrar_inline=True, renderiza no Colab.
+
+    Pula com aviso se o parquet de coleta não existir (permite "Run all"
+    sem derrubar células posteriores).
     """
+    from pncp.ram import precisa_de
     if caminho_parquet is None:
         caminho_parquet = config.caminho(config.SUB_COLETA, "contratos.parquet")
+    if not precisa_de(caminho_parquet, "eda",
+                       "rode pncp.coleta.coletar(...) primeiro"):
+        return None
 
     df = ler_parquet(caminho_parquet)
+    if df.empty:
+        print("[eda] parquet vazio — nada a fazer")
+        return None
     print(f"[eda] {len(df):,} contratos")
 
     # Converte chaves para tipos JSON-safe (Int16/Int64 nullable não serializa

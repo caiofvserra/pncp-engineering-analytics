@@ -111,10 +111,17 @@ def _extrair_cnaes(dados_cnpj):
 def executar(caminho_parquet=None,
              max_consultas=200,
              caminho_excel_crea="cnaes_crea.xlsx"):
+    from pncp.ram import precisa_de
     if caminho_parquet is None:
         caminho_parquet = config.caminho(config.SUB_COLETA, "contratos.parquet")
+    if not precisa_de(caminho_parquet, "cnae",
+                       "rode pncp.coleta.coletar(...) primeiro"):
+        return None
 
     df = ler_parquet(caminho_parquet)
+    if df.empty:
+        print("[cnae] parquet vazio — pulando")
+        return None
     col_cnpj = next((c for c in ("niFornecedor", "cnpjFornecedor", "cnpj")
                       if c in df.columns), None)
     if col_cnpj is None:

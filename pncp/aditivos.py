@@ -54,10 +54,17 @@ def _eh_mudanca_escopo(aditivo):
 
 @com_gc
 def executar(caminho_parquet=None, max_contratos=200, apenas_geral=True):
+    from pncp.ram import precisa_de
     if caminho_parquet is None:
         caminho_parquet = config.caminho(config.SUB_COLETA, "contratos.parquet")
+    if not precisa_de(caminho_parquet, "aditivos",
+                       "rode pncp.coleta.coletar(...) primeiro"):
+        return None
 
     df = ler_parquet(caminho_parquet)
+    if df.empty:
+        print("[aditivos] parquet vazio — pulando")
+        return None
     col_ncp = next((c for c in ("numeroControlePNCP", "numero_controle_pncp",
                                  "numeroControlePncp")
                      if c in df.columns), None)

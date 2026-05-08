@@ -170,13 +170,20 @@ def detectar_marcadores(texto):
 # ── Pipeline ─────────────────────────────────────────────────────────────────
 @com_gc
 def executar(caminho_parquet=None, max_contratos=200, ranking_path=None):
+    from pncp.ram import precisa_de
     if caminho_parquet is None:
         caminho_parquet = config.caminho(config.SUB_COLETA, "contratos.parquet")
     if ranking_path is None:
         ranking_path = config.caminho(config.SUB_P2, "ranking.parquet")
+    if not precisa_de(caminho_parquet, "pdfs",
+                       "rode pncp.coleta.coletar(...) primeiro"):
+        return None
 
     monitorar_ram("início pdfs")
     df = ler_parquet(caminho_parquet)
+    if df.empty:
+        print("[pdfs] parquet vazio — pulando")
+        return None
 
     # Prioriza contratos do ranking (top suspeitos) se disponível
     col_ncp = next((c for c in ("numeroControlePNCP", "numero_controle_pncp",

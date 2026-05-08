@@ -133,9 +133,16 @@ def executar(caminho_parquet=None):
     Saída: dados/triagem/triagem.parquet com colunas extras.
     Também salva resumo.json com contagens.
     """
+    from pncp.ram import precisa_de
     if caminho_parquet is None:
         caminho_parquet = config.caminho(config.SUB_COLETA, "contratos.parquet")
+    if not precisa_de(caminho_parquet, "triagem",
+                       "rode pncp.coleta.coletar(...) primeiro"):
+        return None
     df = ler_parquet(caminho_parquet)
+    if df.empty:
+        print("[triagem] parquet vazio — pulando")
+        return None
 
     # 1. Pré-filtro lexical sobre o objeto
     print("[triagem] aplicando pré-filtro lexical...")

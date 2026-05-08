@@ -336,6 +336,11 @@ def glossario(termo=None):
 @com_gc
 def gerar():
     """Roda consolidação + estatísticas + markdown final."""
+    from pncp.ram import precisa_de
+    if not precisa_de(config.caminho(config.SUB_COLETA, "contratos.parquet"),
+                       "relatorio",
+                       "rode pncp.coleta.coletar(...) primeiro"):
+        return None
     consolidar()
     salvar_json(estatisticas(),
                  config.caminho(config.SUB_P9, "estatisticas.json"))

@@ -52,9 +52,17 @@ def limpar(texto) -> str:
 def preprocessar(caminho_parquet):
     """
     Adiciona coluna `objeto_limpo` ao parquet e regrava.
+    Idempotente — rodar várias vezes não duplica trabalho.
     Retorna o mesmo path (para encadear).
     """
+    from pncp.ram import precisa_de
+    if not precisa_de(caminho_parquet, "texto.preprocessar",
+                       "rode pncp.coleta.coletar(...) primeiro"):
+        return caminho_parquet
     df = ler_parquet(caminho_parquet)
+    if df.empty:
+        print("[texto] parquet vazio — pulando")
+        return caminho_parquet
     if "objeto_limpo" not in df.columns:
         df["objeto_limpo"] = df["objeto"].fillna("").map(limpar)
         salvar_parquet(df, caminho_parquet)
@@ -69,10 +77,17 @@ def construir_tfidf(caminho_parquet, caminho_saida=None):
     Returns:
         dict com paths: {"X": ..., "vec": ..., "labels": ...}
     """
+    from pncp.ram import precisa_de
+    if not precisa_de(caminho_parquet, "texto.tfidf",
+                       "rode preprocessar() primeiro"):
+        return None
     if caminho_saida is None:
         caminho_saida = config.caminho(config.SUB_P2)
 
     df = ler_parquet(caminho_parquet, colunas=["objeto_limpo", "rotulo"])
+    if df.empty:
+        print("[texto] parquet vazio — pulando TF-IDF")
+        return None
     vec = TfidfVectorizer(
         max_features=config.TFIDF_MAX_FEATURES,
         min_df=config.TFIDF_MIN_DF,

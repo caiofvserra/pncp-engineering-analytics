@@ -189,6 +189,30 @@ def _salvar_checkpoint(chk_path, todos):
         print(f"   ⚠ falha no checkpoint: {e}")
 
 
+def _atualizar_consolidado(todos, uf):
+    """
+    Gera/atualiza os parquets consolidados (filtrados por UF e limpos)
+    a partir da lista atual em RAM. Chamado a cada fim de mês completo
+    para que as células posteriores sempre encontrem o consolidado
+    com os dados mais recentes — mesmo se a coleta total ainda estiver
+    em curso ou for interrompida.
+    """
+    if not todos:
+        return
+    try:
+        df = pd.DataFrame(todos).drop_duplicates(subset=["numeroControlePNCP"])
+        if uf and "ufSigla" in df.columns:
+            df = df[df["ufSigla"].astype(str).str.upper() == uf.upper()].copy()
+        df_limpo = limpar(df)
+        if df_limpo.empty:
+            return
+        salvar_parquet(df_limpo, _path_consolidado(uf))
+        salvar_parquet(df_limpo, _path_consolidado())
+        print(f"   📦 consolidado atualizado: {len(df_limpo):,} contratos limpos")
+    except Exception as e:
+        print(f"   ⚠ falha ao atualizar consolidado: {e}")
+
+
 # ── Path do checkpoint e progresso ──────────────────────────────────────────
 # Por que chavear por UF e não por range:
 #   Se você roda coletar(uf='SP', anos=range(2024, 2026)) e depois
@@ -582,6 +606,12 @@ def coletar(uf, anos, mes_inicio=1, mes_fim=12, max_paginas=200, tamanho=500):
             "meses_completos": sorted(meses_completos),
             "meses_parciais": meses_parciais,
         })
+
+        # Atualiza o consolidado após CADA mês completo. Garante que
+        # as células posteriores sempre vejam o estado mais recente
+        # mesmo se a coleta total não terminar nesta sessão.
+        if mes_terminou_natural:
+            _atualizar_consolidado(todos, uf)
 
     if not todos:
         print("[coleta] nada baixado — verifique conexão e parâmetros")
