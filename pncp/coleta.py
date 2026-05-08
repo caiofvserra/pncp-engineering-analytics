@@ -465,6 +465,31 @@ def coletar(uf, anos, mes_inicio=1, mes_fim=12, max_paginas=200, tamanho=500):
             print(f"   ↻ checkpoint: {len(todos):,} registros já em disco")
         except Exception:
             todos = []
+    else:
+        # Migração: procura checkpoints no formato ANTIGO
+        # (checkpoint_SP_2024_2026.parquet etc) e os mescla.
+        pasta = config.PASTA_DADOS / config.SUB_COLETA
+        antigos = []
+        if pasta.exists():
+            antigos = sorted(pasta.glob(f"checkpoint_{uf}_*.parquet"))
+        if antigos:
+            print(f"   ↻ migrando {len(antigos)} checkpoint(s) do formato antigo:")
+            pedacos = []
+            for a in antigos:
+                try:
+                    d = pd.read_parquet(a)
+                    print(f"     • {a.name} ({len(d):,} regs)")
+                    pedacos.append(d)
+                except Exception as e:
+                    print(f"     ⚠ pulando {a.name}: {e}")
+            if pedacos:
+                df_migrado = (pd.concat(pedacos, ignore_index=True)
+                              .drop_duplicates(subset=["numeroControlePNCP"]))
+                todos = df_migrado.to_dict("records")
+                # Salva no novo path para evitar re-migração nas próximas
+                salvar_parquet(df_migrado, chk_path)
+                print(f"   ✓ migrado para {chk_path.name} "
+                      f"({len(df_migrado):,} regs únicos)")
 
     # Resumo do que vai acontecer
     chaves_range = [f"{a}-{m:02d}" for a, m in pares]
