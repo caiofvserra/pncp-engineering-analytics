@@ -190,14 +190,16 @@ def _salvar_checkpoint(chk_path, todos):
 
 
 # ── Path do checkpoint e progresso ──────────────────────────────────────────
-def _path_checkpoint(uf, ano_ini, ano_fim):
-    nome = f"checkpoint_{uf}_{ano_ini}_{ano_fim}.parquet"
-    return config.caminho(config.SUB_COLETA, nome)
+# Por que chavear por UF e não por range:
+#   Se você roda coletar(uf='SP', anos=range(2024, 2026)) e depois
+#   coletar(uf='SP', anos=range(2024, 2027)), o estado deve ser PRESERVADO.
+#   Antes, era chaveado por range — mudou range, perdia progresso.
+def _path_checkpoint(uf):
+    return config.caminho(config.SUB_COLETA, f"checkpoint_{uf}.parquet")
 
 
-def _path_progresso(uf, ano_ini, ano_fim):
-    nome = f"progresso_{uf}_{ano_ini}_{ano_fim}.json"
-    return config.caminho(config.SUB_COLETA, nome)
+def _path_progresso(uf):
+    return config.caminho(config.SUB_COLETA, f"progresso_{uf}.json")
 
 
 def _path_consolidado(uf=None):
@@ -205,61 +207,197 @@ def _path_consolidado(uf=None):
     return config.caminho(config.SUB_COLETA, nome)
 
 
-def _ler_progresso(path):
-    """Estado de progresso. Estrutura:
-        {"meses_completos": ["2024-01", ...],
-         "ultimo_parcial":  {"mes": "2024-05", "ultima_pagina": 12, "registros": 5874}}
+# ── Frequência de checkpoint ─────────────────────────────────────────────────
+# A cada N páginas grava o parquet em disco. Quanto menor, menos furo de
+# dados em interrupção, mas mais I/O no Drive.
+# 5 = compromisso: re-baixa no máx 4 páginas (~2000 regs) por interrupção.
+CHECKPOINT_A_CADA = 5
+
+
+def _ler_progresso(path, uf=None, ano_ini=None, ano_fim=None):
+    """Estado de progresso por UF. Estrutura:
+
+        {
+          "meses_completos": ["2024-01", ...],      # baixados inteiros
+          "meses_parciais": {                        # iniciados mas não terminados
+            "2024-06": {"ultima_pagina_salva": 15, "registros": 7500}
+          }
+        }
+
+    Faz migração transparente do formato antigo (que tinha "ultimo_parcial"
+    único e era chaveado por range).
     """
+    import json as _json
+
     if path.exists():
         try:
-            import json
-            return json.loads(path.read_text(encoding="utf-8"))
+            d = _json.loads(path.read_text(encoding="utf-8"))
+            # Migra: formato antigo tinha "ultimo_parcial" único
+            if "meses_parciais" not in d and "ultimo_parcial" in d:
+                ultimo = d.get("ultimo_parcial")
+                d["meses_parciais"] = {}
+                if ultimo:
+                    d["meses_parciais"][ultimo["mes"]] = {
+                        "ultima_pagina_salva": int(ultimo.get("ultima_pagina", 0)),
+                        "registros": int(ultimo.get("registros", 0)),
+                    }
+                d.pop("ultimo_parcial", None)
+            d.setdefault("meses_completos", [])
+            d.setdefault("meses_parciais", {})
+            return d
         except Exception:
             pass
-    return {"meses_completos": [], "ultimo_parcial": None}
+
+    # Tenta migrar progresso de range antigo (chaveado por ano_ini/ano_fim)
+    if uf and ano_ini and ano_fim:
+        antigo = config.caminho(
+            config.SUB_COLETA,
+            f"progresso_{uf}_{ano_ini}_{ano_fim}.json",
+        )
+        if antigo.exists():
+            try:
+                d = _json.loads(antigo.read_text(encoding="utf-8"))
+                # Aplica a mesma migração + retorna
+                if "meses_parciais" not in d and "ultimo_parcial" in d:
+                    ultimo = d.get("ultimo_parcial")
+                    d["meses_parciais"] = {}
+                    if ultimo:
+                        d["meses_parciais"][ultimo["mes"]] = {
+                            "ultima_pagina_salva": int(ultimo.get("ultima_pagina", 0)),
+                            "registros": int(ultimo.get("registros", 0)),
+                        }
+                    d.pop("ultimo_parcial", None)
+                d.setdefault("meses_completos", [])
+                d.setdefault("meses_parciais", {})
+                print(f"   ↻ migrando progresso antigo {antigo.name} → {path.name}")
+                return d
+            except Exception:
+                pass
+
+    return {"meses_completos": [], "meses_parciais": {}}
 
 
 def _salvar_progresso(path, prog):
-    import json
+    import json as _json
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(prog, ensure_ascii=False, indent=2),
+    # Garante ordenação determinística (facilita inspeção visual)
+    prog_out = {
+        "meses_completos": sorted(prog.get("meses_completos", [])),
+        "meses_parciais": dict(sorted(
+            (prog.get("meses_parciais") or {}).items())),
+    }
+    path.write_text(_json.dumps(prog_out, ensure_ascii=False, indent=2),
                      encoding="utf-8")
 
 
-def status(uf, anos):
-    """Mostra o estado atual da coleta — quais meses prontos e qual parcial."""
-    if isinstance(anos, int):
-        anos = [anos]
-    anos = sorted(list(anos))
-    ano_ini, ano_fim = anos[0], anos[-1]
-    prog = _ler_progresso(_path_progresso(uf, ano_ini, ano_fim))
-    chk = _path_checkpoint(uf, ano_ini, ano_fim)
+def status(uf, anos=None):
+    """Mostra o estado atual da coleta para a UF.
 
-    print(f"\n📊 Status coleta {uf} {ano_ini}-{ano_fim}")
+    Se `anos` for fornecido, também imprime quais meses do range estão
+    pendentes (não em meses_completos, com ou sem parcial).
+    """
+    prog = _ler_progresso(_path_progresso(uf), uf=uf)
+    chk = _path_checkpoint(uf)
+
+    print(f"\n📊 Status coleta {uf}")
     print(f"   meses completos: {len(prog['meses_completos'])}")
     if prog["meses_completos"]:
-        print(f"     {prog['meses_completos']}")
-    if prog["ultimo_parcial"]:
-        p = prog["ultimo_parcial"]
-        print(f"   parcial: {p['mes']} (página {p['ultima_pagina']}, "
-              f"{p.get('registros', 0):,} regs)")
+        for m in prog["meses_completos"]:
+            print(f"     ✓ {m}")
+    print(f"   meses parciais: {len(prog['meses_parciais'])}")
+    for m, info in prog["meses_parciais"].items():
+        print(f"     ↻ {m}: até pág {info['ultima_pagina_salva']} "
+              f"({info.get('registros', 0):,} regs)")
     if chk.exists():
         df = pd.read_parquet(chk)
         print(f"   checkpoint: {len(df):,} registros em {chk.name}")
     else:
         print(f"   checkpoint: ainda não existe")
+
+    if anos is not None:
+        if isinstance(anos, int):
+            anos = [anos]
+        anos = sorted(list(anos))
+        ano_ini, ano_fim = anos[0], anos[-1]
+        pares = [(a, m) for a in range(ano_ini, ano_fim + 1) for m in range(1, 13)]
+        chaves = [f"{a}-{m:02d}" for a, m in pares]
+        completos = set(prog["meses_completos"])
+        parciais = set(prog["meses_parciais"].keys())
+        pendentes = [c for c in chaves if c not in completos]
+        novos = [c for c in pendentes if c not in parciais]
+        print(f"\n   No range {ano_ini}-{ano_fim}:")
+        print(f"     • {len(chaves)} meses no total")
+        print(f"     • {len(chaves) - len(pendentes)} já completos")
+        print(f"     • {len([c for c in pendentes if c in parciais])} parciais")
+        print(f"     • {len(novos)} a baixar do zero")
     return prog
+
+
+def verificar_duplicatas(uf=None):
+    """
+    Conta duplicatas no checkpoint por numeroControlePNCP. Mostra também
+    quantas linhas seriam removidas pelo dedup. Use depois de qualquer
+    coleta para confirmar integridade.
+    """
+    chk = _path_checkpoint(uf) if uf else _path_consolidado()
+    if not chk.exists():
+        # Fallback: tenta o consolidado
+        cand = _path_consolidado(uf)
+        if cand.exists():
+            chk = cand
+        else:
+            print(f"[duplicatas] {chk} não existe")
+            return None
+
+    df = pd.read_parquet(chk)
+    n_total = len(df)
+    if "numeroControlePNCP" not in df.columns:
+        print("[duplicatas] coluna numeroControlePNCP ausente")
+        return None
+    n_unico = df["numeroControlePNCP"].nunique()
+    n_dup = n_total - n_unico
+    print(f"\n🔍 Verificação de duplicatas em {chk.name}")
+    print(f"   total de linhas:        {n_total:,}")
+    print(f"   numeroControlePNCP únicos: {n_unico:,}")
+    print(f"   duplicatas:             {n_dup:,}")
+    if n_dup > 0:
+        # Mostra os top-5 NCPs mais duplicados (para diagnóstico)
+        top = (df["numeroControlePNCP"].value_counts().head(5))
+        print(f"   top NCPs duplicados:")
+        for ncp, n in top.items():
+            if n > 1:
+                print(f"     {n}× {ncp}")
+        print(f"   👉 use `pncp.coleta.deduplicar(uf='{uf}')` para limpar")
+    return {"n_total": n_total, "n_unico": n_unico, "n_duplicado": n_dup}
+
+
+def deduplicar(uf=None):
+    """Remove duplicatas do checkpoint e do consolidado, mantendo a 1ª."""
+    for cand in [_path_checkpoint(uf) if uf else None,
+                 _path_consolidado(uf) if uf else None,
+                 _path_consolidado()]:
+        if cand and cand.exists():
+            df = pd.read_parquet(cand)
+            antes = len(df)
+            df = df.drop_duplicates(subset=["numeroControlePNCP"], keep="first")
+            depois = len(df)
+            if depois < antes:
+                salvar_parquet(df, cand)
+                print(f"   🧹 {cand.name}: {antes:,} → {depois:,} "
+                      f"(removidas {antes - depois:,} duplicatas)")
 
 
 # ── Coleta principal ─────────────────────────────────────────────────────────
 def coletar(uf, anos, mes_inicio=1, mes_fim=12, max_paginas=200, tamanho=500):
     """
-    Coleta contratos via /v1/contratos, mês a mês, com retomada automática.
+    Coleta contratos via /v1/contratos, mês a mês, com retomada perfeita.
 
-    Pode chamar várias vezes com os MESMOS parâmetros — a função verifica
-    o que já está salvo e só baixa o que falta:
-      - Pula meses que já estão marcados como completos
-      - Retoma o último mês parcial da página seguinte à última salva
+    Estado por UF (não por range): pode chamar com `range(2024, 2026)` e
+    depois `range(2024, 2027)` que o progresso é preservado.
+
+    Retomada por mês independente: cada mês tem seu próprio estado
+    (completo / parcial / não iniciado). Mês com falhas é re-tentado
+    na próxima execução, sem duplicar nem furar dados.
 
     Args:
         uf: UF para filtro pós-download (ex: 'SP')
@@ -278,7 +416,6 @@ def coletar(uf, anos, mes_inicio=1, mes_fim=12, max_paginas=200, tamanho=500):
     anos = sorted(list(anos))
     ano_ini, ano_fim = anos[0], anos[-1]
 
-    # Constrói lista (ano, mês)
     pares = []
     for a in range(ano_ini, ano_fim + 1):
         m_ini = mes_inicio if a == ano_ini else 1
@@ -286,34 +423,48 @@ def coletar(uf, anos, mes_inicio=1, mes_fim=12, max_paginas=200, tamanho=500):
         for m in range(m_ini, m_fim + 1):
             pares.append((a, m))
 
-    print(f"\n🔎 Coleta PNCP — {uf} | {ano_ini}-{ano_fim}  "
-          f"({len(pares)} meses)")
+    print(f"\n🔎 Coleta PNCP — {uf} | {ano_ini}-{ano_fim}  ({len(pares)} meses)")
 
-    chk_path = _path_checkpoint(uf, ano_ini, ano_fim)
-    prog_path = _path_progresso(uf, ano_ini, ano_fim)
-    prog = _ler_progresso(prog_path)
+    chk_path = _path_checkpoint(uf)
+    prog_path = _path_progresso(uf)
+    prog = _ler_progresso(prog_path, uf=uf, ano_ini=ano_ini, ano_fim=ano_fim)
     meses_completos = set(prog["meses_completos"])
-    parcial = prog["ultimo_parcial"]
+    meses_parciais = dict(prog["meses_parciais"])
 
+    # Carrega checkpoint existente (se houver) — RAM começa com o que já foi
+    # baixado e persistido. Páginas re-baixadas no meio de meses parciais
+    # serão deduplicadas no fim por numeroControlePNCP.
     todos = []
     if chk_path.exists():
         try:
-            anteriores = pd.read_parquet(chk_path)
-            todos = anteriores.to_dict("records")
-            print(f"   ↻ checkpoint encontrado: {len(todos):,} registros já salvos")
+            todos = pd.read_parquet(chk_path).to_dict("records")
+            print(f"   ↻ checkpoint: {len(todos):,} registros já em disco")
         except Exception:
             todos = []
 
-    if meses_completos:
-        print(f"   ✓ {len(meses_completos)} mês(es) já completos — pulando")
-    if parcial:
-        print(f"   ↻ {parcial['mes']} parcial: vai retomar da página "
-              f"{parcial['ultima_pagina'] + 1}")
+    # Resumo do que vai acontecer
+    chaves_range = [f"{a}-{m:02d}" for a, m in pares]
+    a_baixar = [c for c in chaves_range if c not in meses_completos]
+    a_retomar = [c for c in a_baixar if c in meses_parciais]
+    a_novo = [c for c in a_baixar if c not in meses_parciais]
+    print(f"   ✓ {len(chaves_range) - len(a_baixar)} mês(es) já completos — pulando")
+    if a_retomar:
+        print(f"   ↻ {len(a_retomar)} mês(es) parciais a retomar:")
+        for c in a_retomar:
+            info = meses_parciais[c]
+            print(f"     {c}: retomar da pág {info['ultima_pagina_salva'] + 1} "
+                  f"(já tem {info.get('registros', 0):,} regs em disco)")
+    if a_novo:
+        print(f"   → {len(a_novo)} mês(es) novos para baixar do zero")
 
-    for (a, mes) in tqdm(pares, desc="📅 Meses", unit="mês"):
+    total_meses_a_processar = len(a_baixar)
+    idx_processado = 0
+
+    for (a, mes) in pares:
         chave = f"{a}-{mes:02d}"
         if chave in meses_completos:
             continue
+        idx_processado += 1
 
         d_ini = datetime.date(a, mes, 1).strftime("%Y%m%d")
         if mes < 12:
@@ -322,15 +473,24 @@ def coletar(uf, anos, mes_inicio=1, mes_fim=12, max_paginas=200, tamanho=500):
             d_fim = datetime.date(a, 12, 31)
         d_fim = d_fim.strftime("%Y%m%d")
 
-        # Determina página inicial — retoma o parcial se for o mês atual
-        pag_inicio = 1
-        if parcial and parcial["mes"] == chave:
-            pag_inicio = int(parcial["ultima_pagina"]) + 1
-            print(f"\n── {chave} ({d_ini} → {d_fim}) RETOMANDO da pág {pag_inicio} ──")
-        else:
-            print(f"\n── {chave} ({d_ini} → {d_fim}) ──")
+        # Página inicial: retoma se for parcial, senão começa em 1
+        info_parcial = meses_parciais.get(chave)
+        pag_inicio = (info_parcial["ultima_pagina_salva"] + 1
+                      if info_parcial else 1)
+        reg_anteriores = (info_parcial.get("registros", 0)
+                          if info_parcial else 0)
 
-        reg_mes = 0
+        cabecalho = (f"\n── [{idx_processado}/{total_meses_a_processar}] "
+                     f"{chave} ({d_ini} → {d_fim})")
+        if info_parcial:
+            print(f"{cabecalho} RETOMANDO da pág {pag_inicio} "
+                  f"({reg_anteriores:,} regs já em disco) ──")
+        else:
+            print(f"{cabecalho} ──")
+
+        reg_mes_novo = 0
+        ultima_pag_ok = pag_inicio - 1   # nada de novo ainda
+        ultima_pag_salva = info_parcial["ultima_pagina_salva"] if info_parcial else 0
         falhas_seguidas = 0
         mes_terminou_natural = False
 
@@ -347,7 +507,8 @@ def coletar(uf, anos, mes_inicio=1, mes_fim=12, max_paginas=200, tamanho=500):
                 falhas_seguidas += 1
                 print(f"   ✗ pág {pag:3d}: falha — pulando")
                 if falhas_seguidas >= 5:
-                    print(f"   ⚠ 5 falhas seguidas — abandonando o mês")
+                    print(f"   ⚠ 5 falhas seguidas — abandonando o mês "
+                          f"(retomado na próxima sessão)")
                     break
                 continue
 
@@ -370,19 +531,24 @@ def coletar(uf, anos, mes_inicio=1, mes_fim=12, max_paginas=200, tamanho=500):
                 break
 
             todos.extend(_aplanar(r) for r in registros)
-            reg_mes += len(registros)
+            reg_mes_novo += len(registros)
+            ultima_pag_ok = pag
             falhas_seguidas = 0
-            print(f"   → pág {pag:3d}: +{len(registros):4d} (acum: {len(todos):,})")
+            print(f"   → pág {pag:3d}: +{len(registros):4d} "
+                  f"(mês: {reg_anteriores + reg_mes_novo:,} | "
+                  f"global: {len(todos):,})")
 
-            # Atualiza progresso parcial após cada página bem-sucedida
-            parcial = {"mes": chave, "ultima_pagina": pag, "registros": reg_mes}
-
-            # Checkpoint a cada 10 páginas (parquet + progresso)
-            if pag % 10 == 0:
+            # Checkpoint a cada N páginas (não a cada página, por I/O)
+            if pag % CHECKPOINT_A_CADA == 0:
                 _salvar_checkpoint(chk_path, todos)
+                ultima_pag_salva = pag
+                meses_parciais[chave] = {
+                    "ultima_pagina_salva": ultima_pag_salva,
+                    "registros": reg_anteriores + reg_mes_novo,
+                }
                 _salvar_progresso(prog_path, {
                     "meses_completos": sorted(meses_completos),
-                    "ultimo_parcial": parcial,
+                    "meses_parciais": meses_parciais,
                 })
 
             # Página parcial = última (API só preenche < tamanho no fim)
@@ -392,19 +558,30 @@ def coletar(uf, anos, mes_inicio=1, mes_fim=12, max_paginas=200, tamanho=500):
                 break
             time.sleep(config.PAUSA_PAGINA)
 
-        # Marca mês como completo se terminou naturalmente
+        # Salva checkpoint final do mês (incluindo páginas após o último
+        # múltiplo de CHECKPOINT_A_CADA, que ficaram só em RAM)
+        _salvar_checkpoint(chk_path, todos)
+        ultima_pag_salva = ultima_pag_ok    # tudo que chegou em RAM agora está no disco
+
+        # Atualiza estado do mês
         if mes_terminou_natural:
             meses_completos.add(chave)
-            parcial = None
+            meses_parciais.pop(chave, None)
+            print(f"   ✅ {chave} COMPLETO ({reg_anteriores + reg_mes_novo:,} regs)")
+        else:
+            # Mês não terminou — guarda o parcial
+            meses_parciais[chave] = {
+                "ultima_pagina_salva": ultima_pag_salva,
+                "registros": reg_anteriores + reg_mes_novo,
+            }
+            print(f"   ⏸ {chave} PARCIAL (até pág {ultima_pag_salva}, "
+                  f"{reg_anteriores + reg_mes_novo:,} regs) — "
+                  f"retomar próxima sessão")
 
-        # Salva checkpoint e progresso ao fim do mês
-        _salvar_checkpoint(chk_path, todos)
         _salvar_progresso(prog_path, {
             "meses_completos": sorted(meses_completos),
-            "ultimo_parcial": parcial,
+            "meses_parciais": meses_parciais,
         })
-        print(f"   {chave}: {reg_mes:,} registros (mês "
-              f"{'completo' if mes_terminou_natural else 'PARCIAL'})")
 
     if not todos:
         print("[coleta] nada baixado — verifique conexão e parâmetros")
@@ -503,7 +680,12 @@ def carregar_checkpoint(uf=None, caminho=None):
             geral = _path_consolidado()
             if geral.exists():
                 caminho = geral
-        # 3º o checkpoint mais recente
+        # 3º o checkpoint da UF (formato novo)
+        if caminho is None and uf:
+            chk_uf = _path_checkpoint(uf)
+            if chk_uf.exists():
+                caminho = chk_uf
+        # 4º qualquer checkpoint (formato antigo ou outro)
         if caminho is None:
             pasta = config.PASTA_DADOS / config.SUB_COLETA
             if pasta.exists():
