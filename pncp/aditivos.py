@@ -1,60 +1,92 @@
 """
-Camada 3 — Termos aditivos.
+Camada 3 — Termos aditivos (mudança de escopo).
 
-Aditivos que mudam o objeto, prazo ou valor podem indicar mudança de escopo
-não declarada inicialmente. Para contratos rotulados 'geral' que receberam
-aditivo com objeto de engenharia, é forte indício de subenquadramento.
+Insight central: contrato original rotulado 'geral' que recebeu aditivo
+com marcadores de engenharia (ART, RRT, "obra", etc.) é mudança de escopo
+indevida — a licitação original não seguiu o rito de engenharia mas a
+execução acabou incluindo trabalho que exigiria. Sinal jurídico forte.
+
+Output:
+  - dados/aditivos/aditivos.parquet  (1 linha por aditivo)
+  - dados/aditivos/mudanca_escopo_suspeita.csv  (top suspeitos)
+  - dados/aditivos/resumo.json
 """
 
 import time
-import re
 from pathlib import Path
-from typing import List
 
 import pandas as pd
 import requests
 
 from pncp import config
+from pncp._marcadores import (
+    eh_termo_aditivo, detectar_marcadores, normalizar_pdf_text,
+    COLS_MARCADORES, COLS_PRESENCA,
+)
 from pncp.io_disco import ler_parquet, salvar_parquet, salvar_json
 from pncp.ram import liberar, com_gc
 
+import re
+_RX_NCP = re.compile(r"^(?P<cnpj>\d{14})-(?P<tipo>\d+)-(?P<seq>\d+)/(?P<ano>\d{4})$")
 
-_RX_NCP = re.compile(r"^(?P<cnpj>\d{14})-1-(?P<seq>\d{6})/(?P<ano>\d{4})$")
 
-
-def _decompor_ncp(num_controle):
-    if not num_controle:
+def _decompor_ncp(num):
+    if not num:
         return None
-    m = _RX_NCP.match(str(num_controle).strip())
+    m = _RX_NCP.match(str(num).strip())
     if not m:
         return None
-    return {"cnpj": m["cnpj"], "ano": int(m["ano"]),
-            "sequencial": int(m["seq"])}
+    return {"cnpj": m["cnpj"], "tipo": int(m["tipo"]),
+            "ano": int(m["ano"]), "sequencial": int(m["seq"])}
 
 
-def _listar_aditivos(cnpj, ano, seq):
-    """Lista termos aditivos de um contrato via API PNCP."""
-    url = (f"{config.API_INTEGRACAO}/v1/orgaos/{cnpj}/contratos/{ano}/{seq}/"
-           f"termos-aditivos")
+def _listar_arquivos(cnpj, ano, seq, tipo_recurso="compras"):
+    url = (f"{config.API_INTEGRACAO}/v1/orgaos/{cnpj}/{tipo_recurso}/"
+           f"{ano}/{seq}/arquivos")
     try:
         r = requests.get(url, timeout=config.TIMEOUT_HTTP)
-        r.raise_for_status()
-        return r.json() or []
+        if r.status_code != 200:
+            return []
+        d = r.json()
+        return d if isinstance(d, list) else d.get("data", [])
     except Exception:
         return []
 
 
-def _eh_mudanca_escopo(aditivo):
-    """Heurística: tipo do aditivo sugere mudança de escopo/objeto."""
-    txt = " ".join(str(v) for v in aditivo.values() if v).lower()
-    return any(p in txt for p in (
-        "objeto", "escopo", "acréscimo", "acrescimo", "supressão", "supressao",
-        "alteração quantitativa", "alteração qualitativa",
-    ))
+def _baixar_aditivo(cnpj, ano, seq, seq_doc, destino, tipo_recurso="compras"):
+    url = (f"{config.API_INTEGRACAO}/v1/orgaos/{cnpj}/{tipo_recurso}/"
+           f"{ano}/{seq}/arquivos/{seq_doc}")
+    try:
+        r = requests.get(url, timeout=config.PDFS_TIMEOUT, stream=True)
+        if r.status_code != 200:
+            return False
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        with open(destino, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
+        return True
+    except Exception:
+        return False
+
+
+def _extrair_texto_pdf(caminho):
+    try:
+        import fitz
+        doc = fitz.open(caminho)
+        textos = [p.get_text() for i, p in enumerate(doc)
+                   if i < config.PDFS_MAX_PAGINAS]
+        doc.close()
+        return normalizar_pdf_text("\n".join(textos))
+    except Exception:
+        return ""
 
 
 @com_gc
 def executar(caminho_parquet=None, max_contratos=200, apenas_geral=True):
+    """
+    apenas_geral: foca em contratos rotulo='geral' (default), pois é onde
+    a mudança de escopo importa para o TCC. Se False, processa todos.
+    """
     from pncp.ram import precisa_de
     if caminho_parquet is None:
         caminho_parquet = config.caminho(config.SUB_COLETA, "contratos.parquet")
@@ -66,6 +98,7 @@ def executar(caminho_parquet=None, max_contratos=200, apenas_geral=True):
     if df.empty:
         print("[aditivos] parquet vazio — pulando")
         return None
+
     col_ncp = next((c for c in ("numeroControlePNCP", "numero_controle_pncp",
                                  "numeroControlePncp")
                      if c in df.columns), None)
@@ -74,58 +107,111 @@ def executar(caminho_parquet=None, max_contratos=200, apenas_geral=True):
         return None
 
     alvo = df[df["rotulo"] == "geral"] if apenas_geral else df
-    ncps = (alvo[col_ncp].dropna().astype(str).head(max_contratos).tolist())
-    print(f"[aditivos] consultando {len(ncps)} contratos...")
+    ncps = alvo[col_ncp].dropna().astype(str).head(max_contratos).tolist()
+    print(f"[aditivos] varrendo {len(ncps)} contratos "
+          f"({'apenas geral' if apenas_geral else 'todos'})")
 
+    pasta_cache = config.caminho(config.SUB_C3, "cache_aditivos")
     registros = []
+    n_sem_aditivo = n_baixados = n_cache = 0
+
     for i, ncp in enumerate(ncps, 1):
-        partes = _decompor_ncp(ncp)
-        if not partes:
+        info = _decompor_ncp(ncp)
+        if not info or info["tipo"] not in (1, 2):
             continue
-        aditivos = _listar_aditivos(partes["cnpj"], partes["ano"],
-                                       partes["sequencial"])
+
+        recurso = "compras" if info["tipo"] == 1 else "contratos"
+        docs = _listar_arquivos(info["cnpj"], info["ano"],
+                                  info["sequencial"], recurso)
+        aditivos = [d for d in docs if eh_termo_aditivo(d)]
         if not aditivos:
+            n_sem_aditivo += 1
             continue
-        n_total = len(aditivos)
-        n_escopo = sum(1 for a in aditivos if _eh_mudanca_escopo(a))
-        registros.append({
-            "numeroControlePNCP": ncp,
-            "n_aditivos": n_total,
-            "n_aditivos_escopo": n_escopo,
-            "tem_mudanca_escopo": n_escopo > 0,
-        })
+
+        for d in aditivos:
+            seq_doc = d.get("sequencialDocumento") or d.get("sequencial")
+            if not seq_doc:
+                continue
+            cache = pasta_cache / f"{ncp.replace('/', '_')}_aditivo_{seq_doc}.pdf"
+            if cache.exists():
+                n_cache += 1
+            else:
+                if not _baixar_aditivo(info["cnpj"], info["ano"],
+                                          info["sequencial"], seq_doc,
+                                          cache, recurso):
+                    continue
+                n_baixados += 1
+                time.sleep(0.3)
+
+            texto = _extrair_texto_pdf(cache)
+            marc = detectar_marcadores(texto)
+            registros.append({
+                "numeroControlePNCP": ncp,
+                "rotulo_original": str(alvo[alvo[col_ncp] == ncp]["rotulo"]
+                                          .iloc[0]) if not alvo.empty else "",
+                "seq_doc": seq_doc,
+                "titulo": (d.get("titulo") or "")[:200],
+                "data_publicacao": d.get("dataPublicacaoPncp", ""),
+                "n_chars": len(texto),
+                **marc,
+            })
+
         if i % 50 == 0:
-            print(f"[aditivos] {i}/{len(ncps)}")
-        time.sleep(0.3)
+            print(f"[aditivos] {i}/{len(ncps)} | "
+                  f"baixados={n_baixados}, cache={n_cache}, "
+                  f"sem-aditivo={n_sem_aditivo}")
 
     if not registros:
-        print("[aditivos] nenhum aditivo encontrado")
+        print(f"[aditivos] nenhum aditivo encontrado | "
+              f"sem-aditivo={n_sem_aditivo}")
         return None
 
-    out = pd.DataFrame(registros)
-    saida = config.caminho(config.SUB_C3, "aditivos.parquet")
+    feats = pd.DataFrame(registros)
 
-    # ACUMULA: mescla com aditivos.parquet anterior, priorizando o novo.
+    # Mudança de escopo suspeita: contrato 'geral' + aditivo com ≥2
+    # categorias de marcadores de engenharia (Lei 6.496/1977)
+    feats["mudanca_escopo_suspeita"] = (
+        (feats["rotulo_original"] == "geral") &
+        (feats.get("mk_score_engenharia", 0) >= 2)
+    )
+
+    # ACUMULA com runs anteriores
+    saida = config.caminho(config.SUB_C3, "aditivos.parquet")
     if Path(saida).exists():
         try:
-            anterior = ler_parquet(saida)
-            n_antes = len(anterior)
-            mantidos = anterior[
-                ~anterior["numeroControlePNCP"].isin(out["numeroControlePNCP"])
-            ]
-            out = pd.concat([mantidos, out], ignore_index=True)
-            print(f"[aditivos] mesclando: {n_antes} antigos + {len(registros)} novos "
-                  f"→ {len(out)} totais")
+            ant = ler_parquet(saida)
+            mantidos = ant[~ant["numeroControlePNCP"]
+                              .isin(feats["numeroControlePNCP"])]
+            feats = pd.concat([mantidos, feats], ignore_index=True)
         except Exception as e:
-            print(f"[aditivos] não foi possível mesclar: {e}")
+            print(f"[aditivos] mesclagem falhou: {e}")
 
-    salvar_parquet(out, saida)
+    salvar_parquet(feats, saida)
+
+    # Suspeitos em CSV separado para inspeção humana
+    suspeitos = (feats[feats["mudanca_escopo_suspeita"]]
+                 .sort_values("mk_score_engenharia", ascending=False))
+    if not suspeitos.empty:
+        cols = ["numeroControlePNCP", "titulo", "data_publicacao",
+                "mk_score_engenharia"] + [c for c in COLS_PRESENCA
+                                            if c in suspeitos.columns]
+        sus_path = config.caminho(config.SUB_C3,
+                                    "mudanca_escopo_suspeita.csv")
+        suspeitos[cols].to_csv(sus_path, index=False, encoding="utf-8-sig")
+        print(f"[aditivos] ⚠ {len(suspeitos)} mudanças de escopo suspeitas → "
+              f"{sus_path.name}")
+
     salvar_json({
-        "n_contratos": int(len(out)),
-        "n_com_aditivo": int(out["n_aditivos"].gt(0).sum()),
-        "n_com_mudanca_escopo": int(out["tem_mudanca_escopo"].sum()),
+        "n_aditivos_total": int(len(feats)),
+        "n_baixados_sessao": int(n_baixados),
+        "n_cache_hit_sessao": int(n_cache),
+        "n_sem_aditivo": int(n_sem_aditivo),
+        "n_mudanca_escopo_suspeita": int(feats["mudanca_escopo_suspeita"].sum()),
+        "media_score_em_geral": float(
+            feats[feats["rotulo_original"] == "geral"]
+            .get("mk_score_engenharia", pd.Series([0])).mean()
+        ),
     }, config.caminho(config.SUB_C3, "resumo.json"))
-    print(f"[aditivos] {out['tem_mudanca_escopo'].sum()} contratos com "
-          f"mudança de escopo")
-    liberar(df, out)
+    print(f"[aditivos] {len(feats)} aditivos processados → {saida}")
+    liberar(df, feats)
     return saida

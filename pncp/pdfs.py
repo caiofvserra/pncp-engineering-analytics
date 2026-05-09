@@ -1,32 +1,36 @@
 """
-Camada 2 — Análise de PDFs (Termo de Referência / Edital).
+Camada 2 — Termo de Referência / Edital / Projeto Básico (PDFs anexados).
 
-Para cada contrato suspeito, baixa documentos do PNCP, extrai texto via
-PyMuPDF (rápido) ou pdfplumber/OCR (fallback), normaliza (de-hifeniza), e
-detecta marcadores de engenharia (ART, RRT, ABNT, memorial descritivo,
-norma técnica, etc).
+Pipeline:
+  1. Para cada contrato suspeito, lista documentos via API de integração
+  2. Filtra apenas tipos relevantes (TR, Projeto Básico, ETP, Edital, ...)
+  3. Baixa em cache local; usa de novo se já existe
+  4. Extrai texto (PyMuPDF → pdfplumber → OCR como fallbacks)
+  5. Normaliza (de-hifeniza) e detecta marcadores legais (ART, RRT, CREA…)
+  6. Agrega por contrato e produz score 0-9 de engenharia
 
-Stream-friendly: cada PDF é processado e descartado, só features ficam em RAM.
+Output: dados/pdfs/features_pdfs.parquet com 1 linha por contrato.
 """
 
-import re
 import time
-import unicodedata
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 import requests
 
 from pncp import config
+from pncp._marcadores import (
+    MAPA_TIPO_DOCUMENTO, TIPOS_RELEVANTES_ENGENHARIA,
+    detectar_marcadores, normalizar_pdf_text,
+    COLS_MARCADORES, COLS_PRESENCA,
+)
 from pncp.io_disco import ler_parquet, salvar_parquet, salvar_json
 from pncp.ram import liberar, com_gc, monitorar_ram
 
 
-# ── Decompõe número de controle PNCP ─────────────────────────────────────────
-_RX_NCP = re.compile(
-    r"^(?P<cnpj>\d{14})-1-(?P<seq>\d{6})/(?P<ano>\d{4})$"
-)
+# ── numeroControlePNCP → componentes ─────────────────────────────────────────
+import re as _re
+_RX_NCP = _re.compile(r"^(?P<cnpj>\d{14})-(?P<tipo>\d+)-(?P<seq>\d+)/(?P<ano>\d{4})$")
 
 
 def _decompor_ncp(num_controle):
@@ -35,33 +39,38 @@ def _decompor_ncp(num_controle):
     m = _RX_NCP.match(str(num_controle).strip())
     if not m:
         return None
-    return {"cnpj": m["cnpj"], "ano": int(m["ano"]),
-            "sequencial": int(m["seq"])}
+    return {"cnpj": m["cnpj"], "tipo": int(m["tipo"]),
+            "ano": int(m["ano"]), "sequencial": int(m["seq"])}
 
 
-# ── Listagem e download via API PNCP ─────────────────────────────────────────
-def _listar_documentos(cnpj, ano, seq):
-    url = (f"{config.API_INTEGRACAO}/v1/orgaos/{cnpj}/compras/{ano}/{seq}/"
-           f"arquivos")
+# ── API de integração — listagem e download ─────────────────────────────────
+def _listar_documentos(cnpj, ano, seq, tipo_recurso="compras"):
+    url = (f"{config.API_INTEGRACAO}/v1/orgaos/{cnpj}/{tipo_recurso}/"
+           f"{ano}/{seq}/arquivos")
     try:
         r = requests.get(url, timeout=config.PDFS_TIMEOUT)
-        r.raise_for_status()
-        return r.json()
+        if r.status_code != 200:
+            return []
+        payload = r.json()
+        return payload if isinstance(payload, list) else payload.get("data", [])
     except Exception:
         return []
 
 
-def _baixar_documento(cnpj, ano, seq, seq_doc, destino):
-    url = (f"{config.API_INTEGRACAO}/v1/orgaos/{cnpj}/compras/{ano}/{seq}/"
-           f"arquivos/{seq_doc}")
-    r = requests.get(url, timeout=config.PDFS_TIMEOUT, stream=True)
-    if r.status_code != 200:
+def _baixar(cnpj, ano, seq, seq_doc, destino, tipo_recurso="compras"):
+    url = (f"{config.API_INTEGRACAO}/v1/orgaos/{cnpj}/{tipo_recurso}/"
+           f"{ano}/{seq}/arquivos/{seq_doc}")
+    try:
+        r = requests.get(url, timeout=config.PDFS_TIMEOUT, stream=True)
+        if r.status_code != 200:
+            return False
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        with open(destino, "wb") as f:
+            for chunk in r.iter_content(chunk_size=8192):
+                f.write(chunk)
+        return True
+    except Exception:
         return False
-    destino.parent.mkdir(parents=True, exist_ok=True)
-    with open(destino, "wb") as f:
-        for chunk in r.iter_content(chunk_size=8192):
-            f.write(chunk)
-    return True
 
 
 def _path_cache_pdf(num_controle, seq_doc):
@@ -70,16 +79,16 @@ def _path_cache_pdf(num_controle, seq_doc):
     return pasta / nome
 
 
-# ── Extração de texto (3 estratégias) ────────────────────────────────────────
+# ── Extração de texto (3 estratégias em cascata) ────────────────────────────
 def _extrair_pymupdf(caminho):
     try:
         import fitz
         doc = fitz.open(caminho)
         textos = []
-        for i, pag in enumerate(doc):
+        for i, p in enumerate(doc):
             if i >= config.PDFS_MAX_PAGINAS:
                 break
-            textos.append(pag.get_text())
+            textos.append(p.get_text())
         doc.close()
         return "\n".join(textos)
     except Exception:
@@ -90,9 +99,8 @@ def _extrair_pdfplumber(caminho):
     try:
         import pdfplumber
         with pdfplumber.open(caminho) as pdf:
-            textos = [(p.extract_text() or "")
-                       for p in pdf.pages[: config.PDFS_MAX_PAGINAS]]
-        return "\n".join(textos)
+            return "\n".join((p.extract_text() or "")
+                              for p in pdf.pages[:config.PDFS_MAX_PAGINAS])
     except Exception:
         return ""
 
@@ -101,16 +109,14 @@ def _extrair_ocr(caminho):
     if not config.PDFS_USAR_OCR:
         return ""
     try:
-        import fitz
-        import pytesseract
+        import fitz, pytesseract, io
         from PIL import Image
-        import io
         doc = fitz.open(caminho)
         textos = []
-        for i, pag in enumerate(doc):
+        for i, p in enumerate(doc):
             if i >= config.PDFS_MAX_PAGINAS:
                 break
-            pix = pag.get_pixmap(dpi=200)
+            pix = p.get_pixmap(dpi=200)
             img = Image.open(io.BytesIO(pix.tobytes("png")))
             textos.append(pytesseract.image_to_string(img, lang="por"))
         doc.close()
@@ -119,57 +125,25 @@ def _extrair_ocr(caminho):
         return ""
 
 
-def extrair_robusto(caminho):
-    """Tenta PyMuPDF → pdfplumber → OCR. Retorna o primeiro que tiver >100 chars."""
+def extrair_texto(caminho, min_chars=200):
+    """Tenta PyMuPDF → pdfplumber → OCR; retorna o primeiro que satisfaz."""
     for fn in (_extrair_pymupdf, _extrair_pdfplumber, _extrair_ocr):
-        txt = fn(caminho)
-        if len(txt) > 100:
-            return txt
+        t = fn(caminho)
+        if len(t.strip()) >= min_chars:
+            return t
     return ""
-
-
-# ── Normalização (de-hifenização e similares) ────────────────────────────────
-_RX_HIFEN_QUEBRA = re.compile(r"-\s*\n\s*")
-_RX_QUEBRAS = re.compile(r"\s*\n\s*")
-_RX_MULTI_ESPACO = re.compile(r"[ \t]+")
-
-
-def _normalizar(texto):
-    if not texto:
-        return ""
-    t = unicodedata.normalize("NFKC", texto)
-    t = _RX_HIFEN_QUEBRA.sub("", t)        # palavra-\nquebrada → palavraquebrada
-    t = _RX_QUEBRAS.sub(" ", t)
-    t = _RX_MULTI_ESPACO.sub(" ", t)
-    return t.strip().lower()
-
-
-# ── Marcadores de engenharia em PDF ──────────────────────────────────────────
-MARCADORES = {
-    "art": r"\bart\s*(n[ºo]\s*)?\d",
-    "rrt": r"\brrt\s*(n[ºo]\s*)?\d",
-    "abnt_nbr": r"\babnt\s*nbr\s*\d",
-    "memorial": r"\bmemorial\s+descritivo",
-    "projeto_executivo": r"\bprojeto\s+executivo",
-    "as_built": r"\bas\s*[- ]?built",
-    "crea": r"\bcrea\b",
-    "engenheiro": r"\bengenhei[rd]o\b",
-    "norma_tecnica": r"\bnorma\s+t[eé]cnica",
-    "anotacao_responsabilidade": r"\banotac[aã]o\s+de\s+responsabilidade",
-}
-MARCADORES_RX = {k: re.compile(v) for k, v in MARCADORES.items()}
-
-
-def detectar_marcadores(texto):
-    """Retorna dict {marcador: contagem}."""
-    if not texto:
-        return {k: 0 for k in MARCADORES}
-    return {k: len(rx.findall(texto)) for k, rx in MARCADORES_RX.items()}
 
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
 @com_gc
-def executar(caminho_parquet=None, max_contratos=200, ranking_path=None):
+def executar(caminho_parquet=None, max_contratos=200, ranking_path=None,
+             tipos_aceitos=None, apenas_geral_obvio=True):
+    """
+    tipos_aceitos: tipoDocumentoId a baixar. Default = TIPOS_RELEVANTES_ENGENHARIA.
+    apenas_geral_obvio: se True (default), só baixa PDFs de contratos
+       'geral' marcados como `eh_obvio_engenharia` na triagem (mais barato
+       e mais útil — esses são os candidatos a subenquadramento).
+    """
     from pncp.ram import precisa_de
     if caminho_parquet is None:
         caminho_parquet = config.caminho(config.SUB_COLETA, "contratos.parquet")
@@ -178,6 +152,8 @@ def executar(caminho_parquet=None, max_contratos=200, ranking_path=None):
     if not precisa_de(caminho_parquet, "pdfs",
                        "rode pncp.coleta.coletar(...) primeiro"):
         return None
+    if tipos_aceitos is None:
+        tipos_aceitos = TIPOS_RELEVANTES_ENGENHARIA
 
     monitorar_ram("início pdfs")
     df = ler_parquet(caminho_parquet)
@@ -185,7 +161,6 @@ def executar(caminho_parquet=None, max_contratos=200, ranking_path=None):
         print("[pdfs] parquet vazio — pulando")
         return None
 
-    # Prioriza contratos do ranking (top suspeitos) se disponível
     col_ncp = next((c for c in ("numeroControlePNCP", "numero_controle_pncp",
                                  "numeroControlePncp")
                      if c in df.columns), None)
@@ -193,85 +168,148 @@ def executar(caminho_parquet=None, max_contratos=200, ranking_path=None):
         print("[pdfs] coluna numeroControlePNCP não encontrada")
         return None
 
-    if Path(ranking_path).exists():
-        ranking = ler_parquet(ranking_path).head(max_contratos)
-        if col_ncp in ranking.columns:
-            ncps = ranking[col_ncp].dropna().astype(str).tolist()
+    # Prioriza contratos óbvios da triagem (têm PDFs informativos)
+    triagem_path = config.caminho("triagem", "triagem.parquet")
+    if apenas_geral_obvio and triagem_path.exists():
+        triagem = ler_parquet(triagem_path)
+        obvios = triagem[(triagem["rotulo"] == "geral") &
+                          triagem.get("eh_obvio_engenharia", False)]
+        if not obvios.empty:
+            ncps = obvios[col_ncp].dropna().astype(str) \
+                       .head(max_contratos).tolist()
+            print(f"[pdfs] alvo: {len(ncps)} 'geral' óbvios da triagem")
         else:
-            ncps = df[df["rotulo"] == "geral"][col_ncp].dropna().astype(str) \
-                    .head(max_contratos).tolist()
+            ncps = []
+    elif Path(ranking_path).exists():
+        ranking = ler_parquet(ranking_path).head(max_contratos)
+        ncps = (ranking[col_ncp].dropna().astype(str).tolist()
+                if col_ncp in ranking.columns
+                else df[df["rotulo"] == "geral"][col_ncp].dropna().astype(str)
+                       .head(max_contratos).tolist())
     else:
-        ncps = df[df["rotulo"] == "geral"][col_ncp].dropna().astype(str) \
-                .head(max_contratos).tolist()
+        ncps = (df[df["rotulo"] == "geral"][col_ncp].dropna().astype(str)
+                .head(max_contratos).tolist())
+
+    if not ncps:
+        print("[pdfs] nenhum contrato candidato — rode triagem antes")
+        return None
 
     print(f"[pdfs] processando {len(ncps)} contratos...")
     registros = []
+    n_sem_doc = n_baixados = n_cache_hit = 0
+
     for i, ncp in enumerate(ncps, 1):
-        partes = _decompor_ncp(ncp)
-        if not partes:
+        info = _decompor_ncp(ncp)
+        if not info or info["tipo"] not in (1, 2):
             continue
-        docs = _listar_documentos(partes["cnpj"], partes["ano"],
-                                    partes["sequencial"])
-        for doc in docs[:3]:  # no máx 3 PDFs por contrato
-            seq_doc = doc.get("sequencialDocumento") or doc.get("sequencial")
+
+        recurso = "compras" if info["tipo"] == 1 else "contratos"
+        docs = _listar_documentos(info["cnpj"], info["ano"],
+                                    info["sequencial"], recurso)
+        if not docs:
+            n_sem_doc += 1
+            continue
+
+        # Filtra por tipo (só TR/PB/ETP/Edital/etc.)
+        docs_relevantes = []
+        for d in docs:
+            tipo_id = d.get("tipoDocumentoId")
+            if tipo_id is None:
+                # Fallback: tenta achar pelo nome
+                nome = (d.get("tipoDocumentoNome") or "").strip().lower()
+                for k, v in MAPA_TIPO_DOCUMENTO.items():
+                    if v.lower() == nome:
+                        tipo_id = k
+                        break
+            if tipo_id in tipos_aceitos or (tipo_id is None and not tipos_aceitos):
+                docs_relevantes.append((d, tipo_id))
+
+        if not docs_relevantes:
+            continue
+
+        # Limita a 3 PDFs/contrato (TR + PB + Edital normalmente bastam)
+        for d, tipo_id in docs_relevantes[:3]:
+            seq_doc = d.get("sequencialDocumento") or d.get("sequencial")
             if not seq_doc:
                 continue
             cache = _path_cache_pdf(ncp, seq_doc)
-            if not cache.exists():
-                ok = _baixar_documento(partes["cnpj"], partes["ano"],
-                                         partes["sequencial"], seq_doc, cache)
-                if not ok:
+            if cache.exists():
+                n_cache_hit += 1
+            else:
+                if not _baixar(info["cnpj"], info["ano"], info["sequencial"],
+                                seq_doc, cache, recurso):
                     continue
+                n_baixados += 1
                 time.sleep(0.3)
-            texto = _normalizar(extrair_robusto(cache))
+
+            texto = normalizar_pdf_text(extrair_texto(cache))
             marc = detectar_marcadores(texto)
             registros.append({
                 "numeroControlePNCP": ncp,
                 "seq_doc": seq_doc,
+                "tipoDocumentoId": tipo_id,
+                "tipoDocumentoNome": MAPA_TIPO_DOCUMENTO.get(tipo_id, "Outro"),
                 "n_chars": len(texto),
                 **marc,
             })
+
         if i % 20 == 0:
-            print(f"[pdfs] {i}/{len(ncps)}")
+            print(f"[pdfs] {i}/{len(ncps)} | "
+                  f"baixados={n_baixados}, cache={n_cache_hit}, "
+                  f"sem-doc={n_sem_doc}")
             monitorar_ram(f"PDFs {i}")
 
     if not registros:
-        print("[pdfs] nenhum PDF processado com sucesso")
+        print(f"[pdfs] nenhum PDF processado | sem-doc={n_sem_doc}, "
+              f"cache={n_cache_hit}, baixados={n_baixados}")
         return None
 
     feats = pd.DataFrame(registros)
-    # Agrega por contrato (soma de marcadores)
-    agg = feats.groupby("numeroControlePNCP").agg(
-        n_pdfs=("seq_doc", "count"),
-        chars_total=("n_chars", "sum"),
-        **{k: (k, "sum") for k in MARCADORES},
-    ).reset_index()
-    agg["score_engenharia_pdf"] = agg[list(MARCADORES)].sum(axis=1)
+    print(f"[pdfs] {len(feats)} PDFs processados ({n_baixados} novos, "
+          f"{n_cache_hit} cache, {n_sem_doc} contratos sem doc)")
 
+    # Agrega por contrato — soma marcadores, max do score, lista tipos
+    agg_dict = {
+        "n_pdfs": ("seq_doc", "count"),
+        "chars_total": ("n_chars", "sum"),
+        "tipos_doc": ("tipoDocumentoNome",
+                      lambda s: " | ".join(sorted(set(s.dropna())))),
+    }
+    for c in COLS_MARCADORES:
+        if c in feats.columns:
+            agg_dict[c] = (c, "sum")
+    for c in COLS_PRESENCA:
+        if c in feats.columns:
+            agg_dict[c] = (c, "any")
+    agg = feats.groupby("numeroControlePNCP").agg(**agg_dict).reset_index()
+
+    # Score agregado: nº de categorias presentes em qualquer PDF do contrato
+    if any(c in agg.columns for c in COLS_PRESENCA):
+        cols_pres_existem = [c for c in COLS_PRESENCA if c in agg.columns]
+        agg["mk_score_engenharia"] = agg[cols_pres_existem].sum(axis=1)
+
+    # ACUMULA: mescla com features_pdfs anterior (priorizando o novo)
     saida = config.caminho(config.SUB_C2, "features_pdfs.parquet")
-    # ACUMULA: se já existe, mescla com o anterior (priorizando o novo
-    # para contratos re-processados). Assim, rodadas sucessivas com
-    # max_contratos diferentes vão acumulando features em vez de
-    # sobrescrever. PDFs já em cache de disco não são re-baixados.
     if Path(saida).exists():
         try:
-            anterior = ler_parquet(saida)
-            n_antes = len(anterior)
-            # Remove do anterior os que estão no novo (vão ser substituídos)
-            mantidos = anterior[
-                ~anterior["numeroControlePNCP"].isin(agg["numeroControlePNCP"])
-            ]
+            ant = ler_parquet(saida)
+            mantidos = ant[~ant["numeroControlePNCP"]
+                              .isin(agg["numeroControlePNCP"])]
             agg = pd.concat([mantidos, agg], ignore_index=True)
-            print(f"[pdfs] mesclando: {n_antes} antigos + {len(registros)} novos "
-                  f"→ {len(agg)} totais")
+            print(f"[pdfs] mesclando: {len(mantidos)} antigos + {len(registros)} "
+                  f"novos → {len(agg)} totais")
         except Exception as e:
-            print(f"[pdfs] não foi possível mesclar com anterior: {e}")
+            print(f"[pdfs] mesclagem falhou: {e}")
 
     salvar_parquet(agg, saida)
     salvar_json({
         "n_contratos_processados": int(len(agg)),
         "n_pdfs_extraidos": int(len(feats)),
-        "media_score": float(agg["score_engenharia_pdf"].mean()),
+        "media_score": float(agg.get("mk_score_engenharia",
+                                        pd.Series([0])).mean()),
+        "n_baixados_sessao": int(n_baixados),
+        "n_cache_hit_sessao": int(n_cache_hit),
+        "n_sem_doc": int(n_sem_doc),
     }, config.caminho(config.SUB_C2, "resumo.json"))
     print(f"[pdfs] {len(agg)} contratos com features → {saida}")
     liberar(df, feats)
