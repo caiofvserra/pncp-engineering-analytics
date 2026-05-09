@@ -14,11 +14,10 @@ Cada uma lê TF-IDF do disco, salva resultados em dados/avancado/.
 
 import numpy as np
 import pandas as pd
-import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from pncp import config
+from pncp._plot import salvar_e_mostrar
 from pncp.io_disco import (
     ler_parquet, salvar_parquet, salvar_json, salvar_modelo,
 )
@@ -202,10 +201,7 @@ def hierarquico_suspeitos(n_amostra=30):
     fig, ax = plt.subplots(figsize=(10, 5))
     dendrogram(Z, ax=ax, labels=[f"#{i}" for i in idx])
     ax.set_title("Hierárquico — top suspeitos")
-    saida = config.caminho(config.SUB_P3, "hierarquico.png")
-    fig.tight_layout()
-    fig.savefig(saida, dpi=120, bbox_inches="tight")
-    plt.close(fig)
+    saida = salvar_e_mostrar(fig, config.caminho(config.SUB_P3, "hierarquico.png"))
     liberar(art, sub, Z)
     return saida
 

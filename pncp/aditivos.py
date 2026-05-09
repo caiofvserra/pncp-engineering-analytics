@@ -34,7 +34,7 @@ def _decompor_ncp(num_controle):
 
 def _listar_aditivos(cnpj, ano, seq):
     """Lista termos aditivos de um contrato via API PNCP."""
-    url = (f"{config.API_BASE}/v1/orgaos/{cnpj}/contratos/{ano}/{seq}/"
+    url = (f"{config.API_INTEGRACAO}/v1/orgaos/{cnpj}/contratos/{ano}/{seq}/"
            f"termos-aditivos")
     try:
         r = requests.get(url, timeout=config.TIMEOUT_HTTP)

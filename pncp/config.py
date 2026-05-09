@@ -42,7 +42,11 @@ def rotular(cat_id):
 
 
 # ── API PNCP ─────────────────────────────────────────────────────────────────
+# Há DUAS APIs:
+#   1. consulta (https://pncp.gov.br/api/consulta) — lista contratos/contratações
+#   2. integração (https://pncp.gov.br/api/pncp) — documentos (PDFs), aditivos
 API_BASE = "https://pncp.gov.br/api/consulta"
+API_INTEGRACAO = "https://pncp.gov.br/api/pncp"
 PAUSA_PAGINA = 0.3      # rate limit cordial
 TIMEOUT_HTTP = 30
 TENTATIVAS_HTTP = 4

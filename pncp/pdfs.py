@@ -41,7 +41,7 @@ def _decompor_ncp(num_controle):
 
 # ── Listagem e download via API PNCP ─────────────────────────────────────────
 def _listar_documentos(cnpj, ano, seq):
-    url = (f"{config.API_BASE}/v1/orgaos/{cnpj}/compras/{ano}/{seq}/"
+    url = (f"{config.API_INTEGRACAO}/v1/orgaos/{cnpj}/compras/{ano}/{seq}/"
            f"arquivos")
     try:
         r = requests.get(url, timeout=config.PDFS_TIMEOUT)
@@ -52,7 +52,7 @@ def _listar_documentos(cnpj, ano, seq):
 
 
 def _baixar_documento(cnpj, ano, seq, seq_doc, destino):
-    url = (f"{config.API_BASE}/v1/orgaos/{cnpj}/compras/{ano}/{seq}/"
+    url = (f"{config.API_INTEGRACAO}/v1/orgaos/{cnpj}/compras/{ano}/{seq}/"
            f"arquivos/{seq_doc}")
     r = requests.get(url, timeout=config.PDFS_TIMEOUT, stream=True)
     if r.status_code != 200:

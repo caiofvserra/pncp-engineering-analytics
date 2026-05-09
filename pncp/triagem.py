@@ -42,35 +42,43 @@ from pncp.ram import liberar, com_gc
 # Cada padrão é uma frase/expressão que, se aparece no objeto, é
 # praticamente certo que o contrato é de obra/engenharia.
 PADROES_OBVIOS = [
-    # Construção e reforma
-    r"\bconstruc[aã]o\s+(de|da|do|dos|das)\b",
-    r"\breforma\s+(de|da|do|dos|das|estrutural|predial|civil)\b",
-    r"\bampliac[aã]o\s+(de|da|do|dos|das)\b.*(predio|escola|hospital|ponte|ed[ií]ficio)",
+    # Construção e reforma — específicos para evitar "construção da relação"
+    r"\bconstruc[aã]o\s+(de|do|da|dos|das)\s+"
+    r"(predio|edif[ií]cio|escola|creche|posto|ubs|upa|hospital|"
+    r"unidade\s+de|centro\s+de|gin[aá]sio|quadra|ponte|viaduto|"
+    r"passarela|bueiro|muro|cerca|reservat[oó]rio|po[cç]o)\b",
+    r"\breforma\s+(estrutural|predial|geral|completa|de\s+coberta|"
+    r"com\s+amplia[cç][aã]o)\b",
+    r"\bampliac[aã]o\s+(de|do|da)\s+"
+    r"(predio|escola|hospital|ponte|edif[ií]cio|unidade)\b",
     # Infraestrutura viária
-    r"\bpavimentac[aã]o\s+(asf[aá]ltica|com\s+asfalto|de\s+via|de\s+rua)\b",
+    r"\bpavimentac[aã]o\s+(asf[aá]ltica|com\s+asfalto|em\s+(cbuq|cbq)|"
+    r"de\s+via|de\s+rua|paralelep[ií]pedo)\b",
     r"\brecapeamento\s+asf[aá]ltico\b",
-    r"\bdrenagem\s+(pluvial|urbana|de\s+via)\b",
+    r"\bdrenagem\s+(pluvial|urbana|de\s+via|de\s+águas)\b",
     r"\bterraplenagem\b",
+    r"\bcalcamento\s+(parael[ei]p[ií]pedo|em\s+pedra)\b",
     # Obras de arte
-    r"\bconstruc[aã]o\s+de\s+(ponte|viaduto|passarela|bueiro)\b",
     r"\bobra\s+civil\b",
     r"\bobra\s+de\s+arte\s+especial\b",
     # Edificações
     r"\bedificac[aã]o\s+(nova|escolar|hospitalar|p[uú]blica)\b",
-    r"\bconstruc[aã]o\s+de\s+(escola|creche|posto|ubs|upa|hospital)\b",
     # Saneamento e infraestrutura
-    r"\brede\s+de\s+(esgoto|[aá]gua|distribuic[aã]o)\b",
+    r"\brede\s+de\s+(esgoto|[aá]gua|distribuic[aã]o\s+de)\b",
     r"\bestac[aã]o\s+de\s+(tratamento|elevac[aã]o|bombeamento)\b",
     r"\bsubestac[aã]o\s+el[eé]trica\b",
-    # Materiais de obra
-    r"\bestrutura\s+(met[aá]lica|de\s+concreto)\b",
+    # Materiais de obra (se citados no objeto, é eng)
+    r"\bestrutura\s+(met[aá]lica|de\s+concreto\s+armado)\b",
     r"\bconcreto\s+armado\b",
     r"\balvenaria\s+estrutural\b",
     # Documentos técnicos no objeto
-    r"\bprojeto\s+(b[aá]sico|executivo|arquitet[oô]nico|estrutural)\b",
+    r"\bprojeto\s+(b[aá]sico|executivo|arquitet[oô]nico|estrutural|"
+    r"el[eé]trico|hidr[oô]\w+)\b",
     r"\bmemorial\s+descritivo\b",
-    # Profissionais (se citados no objeto, é eng)
-    r"\bengenharia\s+civil\b",
+    r"\bplanilha\s+or[cç]ament[aá]ria\b",
+    r"\bart\s+(do\s+)?crea\b",
+    # Profissionais (se citados no objeto)
+    r"\bengenharia\s+(civil|el[eé]trica|hidr[oô]\w+|sanit[aá]ria)\b",
     r"\barquitet[oô]nico\s+e\s+complementares\b",
 ]
 PADROES_OBVIOS_RX = [re.compile(p, flags=re.IGNORECASE) for p in PADROES_OBVIOS]

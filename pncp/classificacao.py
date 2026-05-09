@@ -31,12 +31,97 @@ from sklearn.metrics import (
     classification_report, confusion_matrix, f1_score,
 )
 
+import matplotlib.pyplot as plt
+
 from pncp import config
+from pncp._plot import salvar_e_mostrar
 from pncp.io_disco import (
     ler_parquet, salvar_parquet, salvar_modelo, salvar_json,
 )
 from pncp.ram import liberar, monitorar_ram, com_gc
 from pncp.texto import carregar_tfidf
+
+
+def g_matrizes_confusao(modelos, X_te, y_te, pasta):
+    """Plota matriz de confusão lado a lado para cada modelo."""
+    n = len(modelos)
+    fig, axes = plt.subplots(1, n, figsize=(5 * n, 4.5))
+    if n == 1:
+        axes = [axes]
+    classes = sorted(set(y_te))
+    for ax, (nome, m) in zip(axes, modelos.items()):
+        pred = m.predict(X_te)
+        cm = confusion_matrix(y_te, pred, labels=classes)
+        cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True).clip(min=1)
+        im = ax.imshow(cm_norm, cmap="Blues", vmin=0, vmax=1)
+        ax.set_title(f"{nome}")
+        ax.set_xticks(range(len(classes)))
+        ax.set_yticks(range(len(classes)))
+        ax.set_xticklabels(classes, rotation=45, ha="right")
+        ax.set_yticklabels(classes)
+        ax.set_xlabel("predito")
+        ax.set_ylabel("real")
+        for i in range(len(classes)):
+            for j in range(len(classes)):
+                ax.text(j, i, f"{cm[i, j]}\n({cm_norm[i, j]:.0%})",
+                        ha="center", va="center",
+                        color="white" if cm_norm[i, j] > 0.5 else "black",
+                        fontsize=9)
+    fig.suptitle("Matrizes de confusão (normalizadas por linha)")
+    return salvar_e_mostrar(fig, pasta / "matrizes_confusao.png")
+
+
+def g_top_features_lr(modelo_lr, vec, pasta, top_n=20):
+    """Top-N features positivas e negativas do LR para classe 'engenharia'."""
+    if not hasattr(modelo_lr, "coef_"):
+        return None
+    classes = list(modelo_lr.classes_)
+    if "engenharia" not in classes:
+        return None
+    idx_eng = classes.index("engenharia")
+    vocab = vec.get_feature_names_out()
+    coef = modelo_lr.coef_[idx_eng]
+    top_pos = np.argsort(coef)[-top_n:]
+    top_neg = np.argsort(coef)[:top_n]
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 6))
+    axes[0].barh(range(top_n), coef[top_pos], color="#2ca02c")
+    axes[0].set_yticks(range(top_n))
+    axes[0].set_yticklabels([vocab[i] for i in top_pos])
+    axes[0].set_title(f"Top {top_n} termos PRO engenharia")
+    axes[0].set_xlabel("coef")
+
+    axes[1].barh(range(top_n), coef[top_neg][::-1], color="#d62728")
+    axes[1].set_yticks(range(top_n))
+    axes[1].set_yticklabels([vocab[i] for i in top_neg[::-1]])
+    axes[1].set_title(f"Top {top_n} termos CONTRA engenharia")
+    axes[1].set_xlabel("coef")
+    return salvar_e_mostrar(fig, pasta / "top_features_lr.png")
+
+
+def g_distribuicao_probs(modelos, X_te, y_te, pasta):
+    """Histograma das probabilidades de 'engenharia' por modelo, separadas
+    por classe real. Mostra qualidade da calibração."""
+    fig, axes = plt.subplots(1, len(modelos), figsize=(5 * len(modelos), 4))
+    if len(modelos) == 1:
+        axes = [axes]
+    for ax, (nome, m) in zip(axes, modelos.items()):
+        if not hasattr(m, "predict_proba"):
+            ax.set_visible(False)
+            continue
+        classes = list(m.classes_)
+        if "engenharia" not in classes:
+            ax.set_visible(False)
+            continue
+        idx_eng = classes.index("engenharia")
+        probs = m.predict_proba(X_te)[:, idx_eng]
+        for rot in classes:
+            mask = (np.array(y_te) == rot)
+            ax.hist(probs[mask], bins=30, alpha=0.5, label=rot, density=True)
+        ax.set_title(f"{nome} — prob(engenharia)")
+        ax.set_xlabel("probabilidade predita")
+        ax.legend(fontsize=8)
+    return salvar_e_mostrar(fig, pasta / "distribuicao_probs.png")
 
 
 # ── Treino e métricas ────────────────────────────────────────────────────────
@@ -244,6 +329,15 @@ def executar(caminho_parquet=None,
     X = artefatos["X"]
     y = artefatos["labels"]["rotulo"].astype(str).values
 
+    # Diagnóstico de balanceamento — F1 baixo geralmente vem de
+    # desbalanceamento severo. Imprimir já ajuda a interpretar resultados.
+    from collections import Counter
+    distrib = Counter(y)
+    total = sum(distrib.values())
+    print(f"[clf] {total:,} amostras | distrib: " +
+          ", ".join(f"{c}={n:,} ({n/total:.1%})"
+                    for c, n in distrib.most_common()))
+
     # Subsample estratificado para treino — RF e CV em 1M linhas é proibitivo
     if max_amostras_treino and X.shape[0] > max_amostras_treino:
         from sklearn.model_selection import StratifiedShuffleSplit
@@ -317,6 +411,20 @@ def executar(caminho_parquet=None,
     incertos = amostra_active_learning(modelos[melhor], X_full, df_meta, n=50)
     if not incertos.empty:
         salvar_parquet(incertos, saida / "amostra_active_learning.parquet")
+
+    # Gráficos diagnósticos (matriz confusão, top features, distrib probs)
+    try:
+        g_matrizes_confusao(modelos, X_te, y_te, saida)
+    except Exception as e:
+        print(f"[clf] matrizes_confusao falhou: {e}")
+    try:
+        g_top_features_lr(modelos["lr"], artefatos["vec"], saida)
+    except Exception as e:
+        print(f"[clf] top_features_lr falhou: {e}")
+    try:
+        g_distribuicao_probs(modelos, X_te, y_te, saida)
+    except Exception as e:
+        print(f"[clf] distribuicao_probs falhou: {e}")
 
     # Persiste modelos e métricas
     for nome, m in modelos.items():

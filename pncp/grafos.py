@@ -16,11 +16,10 @@ from collections import Counter
 import networkx as nx
 import numpy as np
 import pandas as pd
-import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from pncp import config
+from pncp._plot import salvar_e_mostrar
 from pncp.io_disco import ler_parquet, salvar_parquet, salvar_json
 from pncp.ram import liberar, com_gc
 
@@ -128,11 +127,7 @@ def visualizar(G, top_n=50, nome="grafo.png"):
     nx.draw_networkx_edges(H, pos, alpha=0.3, ax=ax)
     ax.set_title(f"Top-{top_n} nós (azul=órgão, laranja=fornecedor)")
     ax.axis("off")
-    saida = config.caminho(config.SUB_P7, nome)
-    fig.tight_layout()
-    fig.savefig(saida, dpi=120, bbox_inches="tight")
-    plt.close(fig)
-    return saida
+    return salvar_e_mostrar(fig, config.caminho(config.SUB_P7, nome))
 
 
 @com_gc
