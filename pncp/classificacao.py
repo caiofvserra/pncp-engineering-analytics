@@ -40,18 +40,19 @@ from pncp.texto import carregar_tfidf
 
 
 # ── Treino e métricas ────────────────────────────────────────────────────────
-def _treinar_modelos(X_tr, y_tr):
+def _treinar_modelos(X_tr, y_tr, n_estimators_rf=100):
     modelos = {
         "lr": LogisticRegression(
-            max_iter=1000, class_weight="balanced", n_jobs=-1, random_state=config.SEED
+            max_iter=1000, class_weight="balanced", n_jobs=-1,
+            random_state=config.SEED, solver="saga",
         ),
         "rf": RandomForestClassifier(
-            n_estimators=200, class_weight="balanced", n_jobs=-1,
-            random_state=config.SEED,
+            n_estimators=n_estimators_rf, class_weight="balanced", n_jobs=-1,
+            random_state=config.SEED, max_depth=20,
         ),
         "svc": CalibratedClassifierCV(  # SVC linear + calibração para ter prob
             LinearSVC(class_weight="balanced", random_state=config.SEED),
-            cv=3,
+            cv=2,
         ),
     }
     for nome, m in modelos.items():
@@ -112,13 +113,13 @@ def _mcnemar(modelo_a, modelo_b, X_te, y_te):
 
 
 def _grid_search_lr(X_tr, y_tr):
-    """GridSearch leve para LR (C). Mantém em escopo enxuto p/ tempo."""
+    """GridSearch enxuto para LR (C). Reduzido para 2 valores × CV2 = 4 fits."""
     grid = GridSearchCV(
         LogisticRegression(max_iter=1000, class_weight="balanced",
-                           n_jobs=-1, random_state=config.SEED),
-        param_grid={"C": [0.1, 1.0, 10.0]},
+                           n_jobs=-1, random_state=config.SEED, solver="saga"),
+        param_grid={"C": [0.5, 2.0]},
         scoring="f1_macro",
-        cv=3,
+        cv=2,
         n_jobs=-1,
     )
     grid.fit(X_tr, y_tr)
@@ -197,10 +198,28 @@ def executar(caminho_parquet=None,
              fazer_grid=True,
              fazer_holdout=True,
              fazer_mcnemar=True,
-             fazer_bootstrap=True):
+             fazer_bootstrap=True,
+             fazer_cv=True,
+             n_bootstrap=200,
+             n_estimators_rf=100,
+             cv_folds=3,
+             max_amostras_treino=300_000,
+             forcar=False):
     """
     Pipeline completo: TF-IDF (carregado do disco) → treino → avaliação →
     ranking → persistência.
+
+    Args:
+      forcar: se True, ignora resultado anterior e re-treina. Default False
+              (skip se já existe metricas.json + ranking.parquet).
+      n_bootstrap: nº de re-amostragens para IC. 200 dá IC bom; 1000 é mais
+                   preciso mas 5× mais lento.
+      n_estimators_rf: árvores no Random Forest. 100 é bom; 200 pouco ganho.
+      cv_folds: 3 (rápido) vs 5 (mais preciso, mais lento).
+      max_amostras_treino: se o dataset for maior que isso, usa subsample
+                           ESTRATIFICADO para treino (preserva proporção
+                           dos rótulos). None = usa tudo. Para 1M+ linhas,
+                           subsample reduz tempo em ~3× sem perda significativa.
     """
     from pncp.ram import precisa_de
     if caminho_parquet is None:
@@ -212,10 +231,32 @@ def executar(caminho_parquet=None,
                        "rode pncp.texto.construir_tfidf(...) primeiro"):
         return None
 
+    # Skip-if-exists: se métricas e ranking já estão salvos, pula
+    metricas_path = saida / "metricas.json"
+    ranking_path = saida / "ranking.parquet"
+    if not forcar and metricas_path.exists() and ranking_path.exists():
+        print(f"[clf] já rodou anteriormente — pulando "
+              f"(use forcar=True para re-treinar)")
+        return saida
+
     monitorar_ram("início clf")
     artefatos = carregar_tfidf()
     X = artefatos["X"]
     y = artefatos["labels"]["rotulo"].astype(str).values
+
+    # Subsample estratificado para treino — RF e CV em 1M linhas é proibitivo
+    if max_amostras_treino and X.shape[0] > max_amostras_treino:
+        from sklearn.model_selection import StratifiedShuffleSplit
+        sss = StratifiedShuffleSplit(n_splits=1,
+                                       train_size=max_amostras_treino,
+                                       random_state=config.SEED)
+        idx_sub, _ = next(sss.split(X, y))
+        X_full, y_full = X, y
+        X, y = X[idx_sub], y[idx_sub]
+        print(f"[clf] subsample estratificado: {X_full.shape[0]:,} → "
+              f"{X.shape[0]:,} (treino) — predição final usa todos")
+    else:
+        X_full, y_full = X, y
 
     metricas = {}
 
@@ -227,13 +268,13 @@ def executar(caminho_parquet=None,
         X_tr, X_te, y_tr, y_te = X, X, y, y
 
     if fazer_grid:
-        print("[clf] grid search LR...")
+        print("[clf] grid search LR (2 Cs × CV2 = 4 fits)...")
         lr_best, params, cv_score = _grid_search_lr(X_tr, y_tr)
         metricas["grid_lr"] = {"melhores_params": params, "cv_f1_macro": cv_score}
     else:
         lr_best = None
 
-    modelos = _treinar_modelos(X_tr, y_tr)
+    modelos = _treinar_modelos(X_tr, y_tr, n_estimators_rf=n_estimators_rf)
     if lr_best is not None:
         modelos["lr"] = lr_best
 
@@ -244,32 +285,36 @@ def executar(caminho_parquet=None,
 
     if fazer_bootstrap:
         metricas["bootstrap"] = {
-            nome: _bootstrap_f1(m, X_te, y_te) for nome, m in modelos.items()
+            nome: _bootstrap_f1(m, X_te, y_te, n=n_bootstrap)
+            for nome, m in modelos.items()
         }
 
     if fazer_mcnemar:
         metricas["mcnemar_lr_vs_rf"] = _mcnemar(modelos["lr"], modelos["rf"],
                                                  X_te, y_te)
 
-    # Cross-validation no conjunto inteiro (k=5)
-    metricas["cv5_f1_macro"] = {}
-    for nome, m in modelos.items():
-        scores = cross_val_score(m, X, y, cv=5, scoring="f1_macro", n_jobs=-1)
-        metricas["cv5_f1_macro"][nome] = {
-            "media": float(scores.mean()), "desvio": float(scores.std()),
-        }
+    if fazer_cv:
+        metricas[f"cv{cv_folds}_f1_macro"] = {}
+        for nome, m in modelos.items():
+            scores = cross_val_score(m, X, y, cv=cv_folds,
+                                       scoring="f1_macro", n_jobs=-1)
+            metricas[f"cv{cv_folds}_f1_macro"][nome] = {
+                "media": float(scores.mean()), "desvio": float(scores.std()),
+            }
 
     # Ranking de suspeitos com o melhor modelo (por F1-engenharia)
     melhor = max(modelos, key=lambda n: metricas["holdout"][n]["f1_engenharia"])
     metricas["melhor_modelo"] = melhor
+    # Para o ranking: usa o dataset COMPLETO (não o subsample) porque
+    # queremos ranquear todos os 'geral', não só uma amostra
     df_meta = ler_parquet(caminho_parquet,
-                          colunas=["objeto", "rotulo", "anoPublicacao",
-                                   "valor", "categoria_id"])
-    ranking = _gerar_ranking(modelos[melhor], X, df_meta)
+                          colunas=["numeroControlePNCP", "objeto", "rotulo",
+                                   "anoPublicacao", "valor"])
+    ranking = _gerar_ranking(modelos[melhor], X_full, df_meta)
     salvar_parquet(ranking.head(5000), saida / "ranking.parquet")
 
     # Amostra para revisão humana via active learning (uncertainty sampling)
-    incertos = amostra_active_learning(modelos[melhor], X, df_meta, n=50)
+    incertos = amostra_active_learning(modelos[melhor], X_full, df_meta, n=50)
     if not incertos.empty:
         salvar_parquet(incertos, saida / "amostra_active_learning.parquet")
 

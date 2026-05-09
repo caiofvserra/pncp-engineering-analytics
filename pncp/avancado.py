@@ -27,14 +27,23 @@ from pncp.texto import carregar_tfidf
 
 
 # ── LDA: tópicos latentes ────────────────────────────────────────────────────
-def lda(n_topicos=8, n_palavras=10):
-    """Latent Dirichlet Allocation sobre TF-IDF. Salva tópicos em JSON."""
+def lda(n_topicos=8, n_palavras=10, max_amostras=200_000):
+    """Latent Dirichlet Allocation sobre TF-IDF. Salva tópicos em JSON.
+
+    Em 1M linhas, LDA é proibitivamente lento. Usamos subsample por padrão
+    (200k) — tópicos descobertos são representativos do corpus inteiro.
+    """
     from sklearn.decomposition import LatentDirichletAllocation
     art = carregar_tfidf()
     X, vec = art["X"], art["vec"]
+    if max_amostras and X.shape[0] > max_amostras:
+        rng = np.random.default_rng(config.SEED)
+        idx = rng.choice(X.shape[0], size=max_amostras, replace=False)
+        X = X[idx]
+        print(f"[avancado] LDA subsample: {art['X'].shape[0]:,} → {X.shape[0]:,}")
     modelo = LatentDirichletAllocation(
         n_components=n_topicos, random_state=config.SEED, n_jobs=-1,
-        learning_method="online", batch_size=2048,
+        learning_method="online", batch_size=2048, max_iter=10,
     )
     modelo.fit(X)
     vocab = vec.get_feature_names_out()
@@ -260,11 +269,17 @@ def gmm(n_componentes=3):
 @com_gc
 def executar(fazer_lda=True, fazer_lp=True, fazer_apriori=True,
              fazer_kmeans=True, fazer_hier=True, fazer_gmm=True,
-             fazer_smote=False):
+             fazer_smote=False, forcar=False):
     """Roda todas as técnicas avançadas (cada uma é opt-in)."""
     from pncp.ram import precisa_de
     if not precisa_de(config.caminho(config.SUB_P2, "X.npz"), "avancado",
                        "rode pncp.texto.construir_tfidf(...) primeiro"):
+        return None
+    # Skip-if-exists: LDA + KMeans + GMM em 1M linhas é pesado
+    saida = config.caminho(config.SUB_P3)
+    if not forcar and (saida / "indice.json").exists():
+        print(f"[avancado] já rodou — pulando "
+              f"(use forcar=True para refazer)")
         return None
     monitorar_ram("início avancado")
     saidas = {}

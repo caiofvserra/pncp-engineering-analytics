@@ -48,8 +48,11 @@ TIMEOUT_HTTP = 30
 TENTATIVAS_HTTP = 4
 
 # ── TF-IDF / texto ───────────────────────────────────────────────────────────
-TFIDF_MAX_FEATURES = 50_000   # cap para não estourar RAM em 300k linhas
-TFIDF_MIN_DF = 5
+# Defaults pensados para 1M+ contratos em Colab Free (12GB RAM):
+#   max_features=30k cobre os termos importantes sem inflar matriz
+#   min_df=10 elimina ruído raro (palavras em <10 docs)
+TFIDF_MAX_FEATURES = 30_000
+TFIDF_MIN_DF = 10
 TFIDF_NGRAM = (1, 2)
 
 # Termos usados para sinalizar engenharia no texto livre

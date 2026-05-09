@@ -70,9 +70,12 @@ def preprocessar(caminho_parquet):
     return caminho_parquet
 
 
-def construir_tfidf(caminho_parquet, caminho_saida=None):
+def construir_tfidf(caminho_parquet, caminho_saida=None, forcar=False):
     """
     Constrói TF-IDF (1,2-grams) sobre `objeto_limpo` e salva sparse + vectorizer.
+
+    Args:
+      forcar: se True, refaz mesmo se X.npz já existe. Default False (skip).
 
     Returns:
         dict com paths: {"X": ..., "vec": ..., "labels": ...}
@@ -83,6 +86,13 @@ def construir_tfidf(caminho_parquet, caminho_saida=None):
         return None
     if caminho_saida is None:
         caminho_saida = config.caminho(config.SUB_P2)
+
+    # Skip-if-exists: TF-IDF é caro (~5-10min em 1M linhas)
+    if not forcar and (caminho_saida / "X.npz").exists() and \
+       (caminho_saida / "vectorizer.joblib").exists():
+        print(f"[texto] TF-IDF já existe — pulando "
+              f"(use forcar=True para refazer)")
+        return None
 
     df = ler_parquet(caminho_parquet, colunas=["objeto_limpo", "rotulo"])
     if df.empty:

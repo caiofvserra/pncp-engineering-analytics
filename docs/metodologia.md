@@ -150,6 +150,93 @@ um deles — tudo é parquet em disco, sem estado vivo entre células.
 
 ---
 
+## Comparativo prático de plataformas
+
+Após observação real do uso (1M+ contratos SP, coleta interrompida 3×,
+classificação ~1h em Colab Free), eis o veredito honesto:
+
+### 🥇 Local com Jupyter / VSCode (RECOMENDADO se possível)
+
+**Pré-requisitos:** 16GB+ RAM, Python 3.10+, ~5GB de disco.
+
+**Vantagens:**
+- Sem timeout de 12h, sem desconexão de Drive
+- TF-IDF de 1M linhas em <5min (vs 20min no Colab Free)
+- Classificação completa em <30min (vs 1-2h no Colab Free)
+- Zero gambiarra de keep-alive, snapshot, retomada
+- Drive nem precisa — escreve direto em `dados/` local
+- Pode rodar coleta em background enquanto trabalha
+
+**Como começar:**
+```bash
+git clone https://github.com/caiofvserra/pncp-engineering-analytics
+cd pncp-engineering-analytics
+git checkout claude/identify-engineering-underclassification-nImeQ
+pip install -r requirements.txt   # ou pip install pandas pyarrow scikit-learn ...
+jupyter lab
+```
+Abra `notebook/pipeline_pncp.ipynb`, **comente a célula 2** (clone+drive),
+substitua por `import pncp` e siga normal. `pncp.config.PASTA_DADOS` aponta
+para `./dados` por default.
+
+### 🥈 Kaggle Notebooks (alternativa Colab Free, melhor)
+
+**Vantagens vs Colab Free:**
+- **30GB de RAM** (vs 12GB Colab Free) — RAM era seu maior gargalo
+- 9 horas de execução contínua (vs 12 que Colab cortava)
+- GPU T4 grátis, mais estável
+- Não cai com idle de 30min
+
+**Desvantagens:**
+- Datasets > 20GB precisam ser uploaded como Kaggle Dataset
+- Não monta Google Drive direto (precisa adaptar paths)
+
+**Setup:** crie notebook em kaggle.com/code, suba `dados/` como dataset
+privado, ajuste `PASTA_DADOS = "/kaggle/working/dados"`.
+
+### 🥉 Colab Pro (R$ 50/mês)
+
+Vale se você **não tem máquina local com 16GB+** mas precisa rodar
+BERTimbau ou análises pesadas. 24-50GB RAM, GPU mais consistente, sem
+desconexão por idle.
+
+### Colab Free (sua situação atual)
+
+**Limitações reais que você está sentindo:**
+- 12GB RAM aperta com 1M linhas + TF-IDF + RF
+- Drive desconecta sob I/O alto (Errno 107)
+- Sessão cai em 12h ou se aba minimizar
+- GridSearch + CV + Bootstrap em 1M = 1-2h facilmente
+
+**Como sobreviver:**
+- Use os defaults novos (subsample, CV3, RF=100) — corta tempo em ~3×
+- `forcar=False` por default em cada `executar()` — não re-faz se já existe
+- Cache PDF/CNAE em disco (já implementado)
+- Snapshots para pontos de verificação
+- Coleta robusta a desconexão (parquet por mês, retomada exata)
+
+### Cloud por hora (GCP / AWS / RunPod)
+
+Para o pico do TCC (BERTimbau final), uma VM com 32GB+GPU custa ~R$ 5-10/h.
+Roda em 1-2h e desliga. < R$ 30 total.
+
+---
+
+## Tempos reais observados (SP, ~1M contratos)
+
+| Etapa | Colab Free | Local 16GB | Kaggle 30GB |
+|---|---|---|---|
+| TF-IDF (max_features=30k) | ~10min | <3min | ~5min |
+| Classificação completa (com defaults novos) | ~25min | ~10min | ~15min |
+| LDA + KMeans + GMM | ~15min | ~5min | ~8min |
+| Outliers (4 detectores + ensemble) | ~10min | ~3min | ~5min |
+| **Pipeline completo (sem coleta)** | **~70min** | **~25min** | **~35min** |
+
+A coleta é cara em qualquer lugar (limitada pela API PNCP) — ~6h para SP
+2024-2026, mas é resistente a interrupção em todos os ambientes.
+
+---
+
 ## Referências teóricas — mapeamento técnica × capítulo
 
 Cada técnica do pipeline tem fundamentação direta nos capítulos do
