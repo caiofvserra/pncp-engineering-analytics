@@ -8,6 +8,7 @@ aditivo com objeto de engenharia, é forte indício de subenquadramento.
 
 import time
 import re
+from pathlib import Path
 from typing import List
 
 import pandas as pd
@@ -103,6 +104,21 @@ def executar(caminho_parquet=None, max_contratos=200, apenas_geral=True):
 
     out = pd.DataFrame(registros)
     saida = config.caminho(config.SUB_C3, "aditivos.parquet")
+
+    # ACUMULA: mescla com aditivos.parquet anterior, priorizando o novo.
+    if Path(saida).exists():
+        try:
+            anterior = ler_parquet(saida)
+            n_antes = len(anterior)
+            mantidos = anterior[
+                ~anterior["numeroControlePNCP"].isin(out["numeroControlePNCP"])
+            ]
+            out = pd.concat([mantidos, out], ignore_index=True)
+            print(f"[aditivos] mesclando: {n_antes} antigos + {len(registros)} novos "
+                  f"→ {len(out)} totais")
+        except Exception as e:
+            print(f"[aditivos] não foi possível mesclar: {e}")
+
     salvar_parquet(out, saida)
     salvar_json({
         "n_contratos": int(len(out)),

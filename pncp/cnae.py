@@ -158,6 +158,19 @@ def executar(caminho_parquet=None,
 
     enriq = pd.DataFrame(registros)
     saida = config.caminho(config.SUB_P8, "fornecedores_cnae.parquet")
+
+    # ACUMULA: mescla com fornecedores_cnae anterior, priorizando o novo.
+    if Path(saida).exists():
+        try:
+            anterior = ler_parquet(saida)
+            n_antes = len(anterior)
+            mantidos = anterior[~anterior["cnpj"].isin(enriq["cnpj"])]
+            enriq = pd.concat([mantidos, enriq], ignore_index=True)
+            print(f"[cnae] mesclando: {n_antes} antigos + {len(registros)} novos "
+                  f"→ {len(enriq)} totais")
+        except Exception as e:
+            print(f"[cnae] não foi possível mesclar: {e}")
+
     salvar_parquet(enriq, saida)
 
     # Cruza com df original e gera amostra para revisão manual
@@ -167,11 +180,50 @@ def executar(caminho_parquet=None,
     salvar_parquet(fortes,
                    config.caminho(config.SUB_P8, "suspeitos_fortes.parquet"))
 
-    # Amostra para revisão manual (CSV — usuário preenche 'revisao_manual')
-    amostra = fortes.head(50).copy()
-    amostra["revisao_manual"] = ""
+    # Amostra para revisão manual — PRESERVA revisões já preenchidas
     saida_csv = config.caminho(config.SUB_P8, "amostra_revisao_manual.csv")
-    amostra.to_csv(saida_csv, index=False)
+    nova_amostra = fortes.head(50).copy()
+    nova_amostra["revisao_manual"] = ""
+
+    if Path(saida_csv).exists():
+        # Se já existe, preserva linhas com revisao_manual preenchida.
+        # Adiciona NCPs novos que ainda não foram revisados.
+        try:
+            anterior_csv = pd.read_csv(saida_csv)
+            if "revisao_manual" in anterior_csv.columns:
+                ja_revisados = anterior_csv[
+                    anterior_csv["revisao_manual"]
+                    .fillna("").astype(str).ne("")
+                ]
+                # Mantém os já revisados + adiciona novos não vistos
+                novos_ncp = set(nova_amostra["numeroControlePNCP"]) - \
+                            set(ja_revisados["numeroControlePNCP"])
+                a_adicionar = nova_amostra[
+                    nova_amostra["numeroControlePNCP"].isin(novos_ncp)
+                ]
+                amostra_final = pd.concat([ja_revisados, a_adicionar],
+                                            ignore_index=True)
+                amostra_final.to_csv(saida_csv, index=False)
+                print(f"[cnae] revisão manual preservada: "
+                      f"{len(ja_revisados)} já revisados + "
+                      f"{len(a_adicionar)} novos = {len(amostra_final)}")
+            else:
+                nova_amostra.to_csv(saida_csv, index=False)
+        except Exception as e:
+            print(f"[cnae] erro ao preservar revisões: {e}")
+            # Backup do CSV antigo antes de sobrescrever
+            try:
+                from datetime import datetime as _dt
+                bak = saida_csv.with_suffix(
+                    f".bak.{_dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                )
+                Path(saida_csv).rename(bak)
+                print(f"[cnae] backup salvo em {bak.name}")
+            except Exception:
+                pass
+            nova_amostra.to_csv(saida_csv, index=False)
+    else:
+        nova_amostra.to_csv(saida_csv, index=False)
 
     metricas = {
         "n_cnpjs_consultados": int(len(cnpjs)),

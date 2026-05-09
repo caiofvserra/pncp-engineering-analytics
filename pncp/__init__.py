@@ -162,3 +162,56 @@ def keep_alive():
         print("        ⚠ mantenha a aba do Colab aberta (mesmo em outra janela)")
     except Exception as e:
         print(f"[colab] keep-alive não pôde ser ativado: {e}")
+
+
+def snapshot(nome, incluir_pdfs_cache=False):
+    """
+    Guarda uma cópia do estado atual de `dados/` numa subpasta
+    `dados/snapshots/<nome>/`. Útil antes de juntar mais dados (ex: você
+    coletou 2024 inteiro, vai analisar, e depois quer baixar 2025-2026
+    sem perder o estado "só 2024" para comparação no TCC).
+
+    Por padrão NÃO inclui o cache de PDFs (pesado). Para incluir tudo:
+    `pncp.snapshot('nome', incluir_pdfs_cache=True)`.
+
+    Para restaurar manualmente, copie de volta os arquivos da subpasta.
+    """
+    import shutil
+    from pncp import config
+
+    base = config.PASTA_DADOS
+    if not base.exists():
+        print(f"[snapshot] {base} ainda não existe — nada a salvar")
+        return None
+
+    destino = base / "snapshots" / nome
+    if destino.exists():
+        print(f"[snapshot] '{nome}' já existe em {destino}")
+        print(f"           use outro nome ou apague o anterior manualmente")
+        return None
+
+    destino.mkdir(parents=True)
+    n_arq = 0
+    for item in base.iterdir():
+        if item.name == "snapshots":
+            continue
+        if not incluir_pdfs_cache and item.name == config.SUB_C2:
+            # Copia features_pdfs.parquet e resumo.json mas pula o cache
+            sub_dst = destino / item.name
+            sub_dst.mkdir()
+            for f in item.iterdir():
+                if f.name == "cache_pdfs":
+                    continue
+                if f.is_file():
+                    shutil.copy2(f, sub_dst / f.name)
+                    n_arq += 1
+            continue
+        if item.is_dir():
+            shutil.copytree(item, destino / item.name)
+            n_arq += sum(1 for _ in (destino / item.name).rglob("*"))
+        else:
+            shutil.copy2(item, destino / item.name)
+            n_arq += 1
+
+    print(f"[snapshot] '{nome}' salvo em {destino} ({n_arq} arquivos)")
+    return destino

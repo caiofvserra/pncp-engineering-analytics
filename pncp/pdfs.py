@@ -249,6 +249,24 @@ def executar(caminho_parquet=None, max_contratos=200, ranking_path=None):
     agg["score_engenharia_pdf"] = agg[list(MARCADORES)].sum(axis=1)
 
     saida = config.caminho(config.SUB_C2, "features_pdfs.parquet")
+    # ACUMULA: se já existe, mescla com o anterior (priorizando o novo
+    # para contratos re-processados). Assim, rodadas sucessivas com
+    # max_contratos diferentes vão acumulando features em vez de
+    # sobrescrever. PDFs já em cache de disco não são re-baixados.
+    if Path(saida).exists():
+        try:
+            anterior = ler_parquet(saida)
+            n_antes = len(anterior)
+            # Remove do anterior os que estão no novo (vão ser substituídos)
+            mantidos = anterior[
+                ~anterior["numeroControlePNCP"].isin(agg["numeroControlePNCP"])
+            ]
+            agg = pd.concat([mantidos, agg], ignore_index=True)
+            print(f"[pdfs] mesclando: {n_antes} antigos + {len(registros)} novos "
+                  f"→ {len(agg)} totais")
+        except Exception as e:
+            print(f"[pdfs] não foi possível mesclar com anterior: {e}")
+
     salvar_parquet(agg, saida)
     salvar_json({
         "n_contratos_processados": int(len(agg)),
