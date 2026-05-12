@@ -26,6 +26,101 @@ from pncp.ram import liberar, com_gc
 _RX_DIGITOS = re.compile(r"\D+")
 
 
+def _gerar_readme_revisao(pasta):
+    """Cria README explicando como preencher amostra_revisao_manual.csv."""
+    texto = """# Instruções de revisão manual — amostra_revisao_manual.csv
+
+## Objetivo
+
+Confirmar (ou refutar) se cada contrato listado é, de fato, um caso de
+**subenquadramento** — isto é, um contrato rotulado pelo órgão como
+"serviços gerais" (categoria 8) que deveria ter sido "obras" (7) ou
+"serviços de engenharia" (9).
+
+## O que olhar
+
+| Coluna | O que é | O que significa |
+|---|---|---|
+| `numeroControlePNCP` | ID único no PNCP | Use para consultar o contrato completo |
+| `objeto` | Descrição livre do contrato | Leia para entender o que está sendo contratado |
+| `valor` | Valor estimado em R$ | Contratos > R$ 50.000 demandam licitação formal |
+| `rotulo` | Rótulo atribuído pelo órgão | Sempre "geral" nesta amostra (é o que estamos auditando) |
+| `cnpj` | CNPJ do fornecedor (CONTRATADO) | Use para consultar a empresa |
+| `razao_social` | Razão social do fornecedor | Nome da empresa contratada |
+| `cnaes` | Lista de CNAEs do fornecedor na Receita | CNAEs declarados pela empresa |
+| `tem_cnae_eng` | Bool — fornecedor tem algum CNAE da lista CONFEA? | **True = empresa registrada como prestadora de eng.** |
+| `cnaes_eng` | Quais CNAEs do CONFEA o fornecedor tem | Lista dos códigos específicos |
+| `mk_score_engenharia` | Score 0-9 nos PDFs do contrato | ≥2 = forte indício de rito de engenharia |
+| `revisao_manual` | **VOCÊ PREENCHE AQUI** | Veja abaixo |
+
+## Como preencher `revisao_manual`
+
+Use exatamente um destes valores (case-sensitive):
+
+| Valor | Quando usar |
+|---|---|
+| `subenq` | **Subenquadramento confirmado.** O objeto é claramente obra ou serviço de engenharia (ex: "construção de muro", "reforma estrutural", "pavimentação"). |
+| `ok` | Rotulação correta. O contrato é mesmo de serviço comum (ex: "limpeza predial", "fornecimento de mão de obra para conservação"). |
+| `duv` | Inconclusivo. Objeto ambíguo ("manutenção predial" pode ser ambos) ou falta informação. |
+
+Depois de preencher pelo menos algumas linhas, rode a Célula 14 para
+gerar métrica de **precisão** (quantos % dos suspeitos do pipeline são
+realmente subenquadramento).
+
+## Onde consultar para decidir
+
+1. **PNCP — página do contrato:**
+   `https://pncp.gov.br/app/contratacoes/<numeroControlePNCP>`
+   Mostra objeto completo, valor, modalidade, documentos anexados (TR,
+   edital). Se a página tem "Termo de Referência" ou "Projeto Básico"
+   no PDF, é forte indício de engenharia.
+
+2. **Receita Federal — CNPJ do fornecedor:**
+   `https://servicos.receita.fazenda.gov.br/Servicos/cnpjreva/Cnpjreva_Solicitacao.asp`
+   ou `https://cnpja.com/office/<cnpj>` (cache web).
+   Confirma CNAEs e razão social.
+
+3. **CONFEA — lista de atividades de engenharia:**
+   `https://www.confea.org.br/cadastro-positivo-de-empresas`
+   Empresas listadas exercem oficialmente engenharia.
+
+4. **TCE-SP / TCU — busca de jurisprudência:**
+   Se houver dúvida jurídica sobre classificação, consulte decisões em
+   `https://www.tce.sp.gov.br/jurisprudencia` ou `https://pesquisa.apps.tcu.gov.br`.
+
+5. **Lei 14.133/2021 (Nova Lei de Licitações):**
+   Art. 6º incisos XII (serviços de engenharia), XX e XXI (obras).
+   Define o que se enquadra em cada categoria.
+
+## Como a amostra foi selecionada
+
+- Apenas contratos rotulados `'geral'` no PNCP
+- E que tem CNAE de engenharia (lista CONFEA — 702 CNAEs) no fornecedor
+- **Stratified sampling**: até 3 contratos por órgão para garantir diversidade
+- Limite atual: 100 contratos (subido de 50)
+
+Se você quiser **revisar mais**, edite `pncp/cnae.py` ou chame:
+```python
+pncp.cnae.executar(max_consultas=500)
+```
+
+## Por que vale a pena fazer essa revisão
+
+A revisão manual gera o **ground truth** que valida estatisticamente
+todo o pipeline. Com 100 revisões, conseguimos calcular:
+- Precisão (% dos suspeitos que são reais)
+- Recall (estimativa, se incluir alguns 'ok' como controle)
+- Concordância pipeline × jurista
+
+Sem essa validação, o TCC não consegue afirmar "X% dos suspeitos do
+modelo são subenquadramento real". Com ela, vira evidência sólida.
+"""
+    path = pasta / "README_revisao_manual.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(texto, encoding="utf-8")
+    return path
+
+
 def _so_digitos(s):
     return _RX_DIGITOS.sub("", str(s)) if s else ""
 
@@ -180,10 +275,25 @@ def executar(caminho_parquet=None,
     salvar_parquet(fortes,
                    config.caminho(config.SUB_P8, "suspeitos_fortes.parquet"))
 
-    # Amostra para revisão manual — PRESERVA revisões já preenchidas
+    # Amostra para revisão manual — PRESERVA revisões já preenchidas.
+    # Em vez de pegar 50 primeiros, faz STRATIFIED SAMPLING por órgão
+    # (evita pegar 50 contratos quase iguais do mesmo órgão).
     saida_csv = config.caminho(config.SUB_P8, "amostra_revisao_manual.csv")
-    nova_amostra = fortes.head(50).copy()
+    n_revisao = 100  # subido de 50 → 100
+    col_orgao = next((c for c in ("razaoSocialOrgao", "nomeUnidade",
+                                     "orgaoEntidade")
+                       if c in fortes.columns), None)
+    if col_orgao and len(fortes) > n_revisao:
+        # Pega no máx 3 por órgão (mais diversidade na revisão)
+        nova_amostra = (fortes.groupby(col_orgao, observed=True, group_keys=False)
+                          .apply(lambda g: g.head(3)).head(n_revisao).copy())
+        print(f"[cnae] amostra estratificada por órgão (até 3/órgão): "
+              f"{len(nova_amostra)} contratos")
+    else:
+        nova_amostra = fortes.head(n_revisao).copy()
     nova_amostra["revisao_manual"] = ""
+
+    _gerar_readme_revisao(config.caminho(config.SUB_P8))
 
     if Path(saida_csv).exists():
         # Se já existe, preserva linhas com revisao_manual preenchida.

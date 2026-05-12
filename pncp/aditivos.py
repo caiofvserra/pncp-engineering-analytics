@@ -82,10 +82,13 @@ def _extrair_texto_pdf(caminho):
 
 
 @com_gc
-def executar(caminho_parquet=None, max_contratos=200, apenas_geral=True):
+def executar(caminho_parquet=None, max_contratos=500, apenas_geral=True,
+             priorizar_antigos=True):
     """
-    apenas_geral: foca em contratos rotulo='geral' (default), pois é onde
-    a mudança de escopo importa para o TCC. Se False, processa todos.
+    apenas_geral: foca em contratos rotulo='geral' (default).
+    priorizar_antigos: contratos mais antigos têm mais chance de já ter
+    recebido aditivo (default True). Útil porque contratos novos
+    raramente têm aditivo ainda — desperdiça API.
     """
     from pncp.ram import precisa_de
     if caminho_parquet is None:
@@ -107,13 +110,16 @@ def executar(caminho_parquet=None, max_contratos=200, apenas_geral=True):
         return None
 
     alvo = df[df["rotulo"] == "geral"] if apenas_geral else df
+    if priorizar_antigos and "dataPublicacaoPncp" in alvo.columns:
+        alvo = alvo.sort_values("dataPublicacaoPncp", ascending=True)
     ncps = alvo[col_ncp].dropna().astype(str).head(max_contratos).tolist()
     print(f"[aditivos] varrendo {len(ncps)} contratos "
-          f"({'apenas geral' if apenas_geral else 'todos'})")
+          f"({'apenas geral' if apenas_geral else 'todos'}"
+          f"{'/antigos primeiro' if priorizar_antigos else ''})")
 
     pasta_cache = config.caminho(config.SUB_C3, "cache_aditivos")
     registros = []
-    n_sem_aditivo = n_baixados = n_cache = 0
+    n_sem_doc = n_sem_aditivo = n_com_aditivo = n_baixados = n_cache = 0
 
     for i, ncp in enumerate(ncps, 1):
         info = _decompor_ncp(ncp)
@@ -123,10 +129,14 @@ def executar(caminho_parquet=None, max_contratos=200, apenas_geral=True):
         recurso = "compras" if info["tipo"] == 1 else "contratos"
         docs = _listar_arquivos(info["cnpj"], info["ano"],
                                   info["sequencial"], recurso)
+        if not docs:
+            n_sem_doc += 1
+            continue
         aditivos = [d for d in docs if eh_termo_aditivo(d)]
         if not aditivos:
             n_sem_aditivo += 1
             continue
+        n_com_aditivo += 1
 
         for d in aditivos:
             seq_doc = d.get("sequencialDocumento") or d.get("sequencial")
@@ -158,12 +168,15 @@ def executar(caminho_parquet=None, max_contratos=200, apenas_geral=True):
 
         if i % 50 == 0:
             print(f"[aditivos] {i}/{len(ncps)} | "
-                  f"baixados={n_baixados}, cache={n_cache}, "
-                  f"sem-aditivo={n_sem_aditivo}")
+                  f"com-aditivo={n_com_aditivo}, sem-aditivo={n_sem_aditivo}, "
+                  f"sem-doc={n_sem_doc}, baixados={n_baixados}, cache={n_cache}")
 
     if not registros:
-        print(f"[aditivos] nenhum aditivo encontrado | "
-              f"sem-aditivo={n_sem_aditivo}")
+        print(f"[aditivos] nenhum aditivo encontrado em {len(ncps)} contratos")
+        print(f"   sem-doc={n_sem_doc}  (contrato não tem doc nenhum)")
+        print(f"   sem-aditivo={n_sem_aditivo}  (tem doc mas nenhum é aditivo)")
+        print(f"   👉 contratos novos geralmente não têm aditivo. "
+              f"Tente max_contratos maior ou apenas_geral=False")
         return None
 
     feats = pd.DataFrame(registros)

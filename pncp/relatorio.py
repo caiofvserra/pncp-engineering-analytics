@@ -3,7 +3,7 @@ Consolidação final — junta sinais de todas as camadas e gera o relatório TC
 
 Sinais (cada um vale um voto/score):
   - prob_engenharia (Camada 1, classificação TF-IDF)
-  - score_engenharia_pdf (Camada 2, marcadores em PDF)
+  - mk_score_engenharia (Camada 2, marcadores em PDF)
   - tem_mudanca_escopo (Camada 3, aditivos)
   - tem_cnae_eng (CNAE do fornecedor)
   - red_flag_grafo (concentração suspeita)
@@ -65,7 +65,7 @@ def consolidar():
     pdfs = _ler_se_existe(config.caminho(config.SUB_C2, "features_pdfs.parquet"))
     if pdfs is not None:
         base = base.merge(
-            pdfs[["numeroControlePNCP", "score_engenharia_pdf"]],
+            pdfs[["numeroControlePNCP", "mk_score_engenharia"]],
             on="numeroControlePNCP", how="left",
         )
 
@@ -87,8 +87,8 @@ def consolidar():
     sinais = []
     if "prob_engenharia" in base.columns:
         sinais.append((base["prob_engenharia"].fillna(0) > 0.5).astype(int))
-    if "score_engenharia_pdf" in base.columns:
-        sinais.append((base["score_engenharia_pdf"].fillna(0) > 0).astype(int))
+    if "mk_score_engenharia" in base.columns:
+        sinais.append((base["mk_score_engenharia"].fillna(0) > 0).astype(int))
     if "tem_mudanca_escopo" in base.columns:
         sinais.append(base["tem_mudanca_escopo"].fillna(False).astype(int))
     if "tem_cnae_eng" in base.columns:
@@ -253,6 +253,89 @@ def gerar_markdown():
         linhas += ["", "## ⚠ Aviso (EDA)",
                     eda["alerta_temporal"].get("mensagem", "")]
 
+    # ── Interpretação dos resultados (contextualiza os números) ──────────
+    linhas += ["", "## 7. Interpretação dos resultados", ""]
+
+    n_total = stats.get("n_total", 0)
+    dist = stats.get("distribuicao", {})
+    n_geral = dist.get("geral", 0)
+    n_eng = dist.get("engenharia", 0)
+    n_obras = dist.get("obras", 0)
+    pct_eng = (n_eng / n_total * 100) if n_total else 0
+    pct_obras_eng = ((n_eng + n_obras) / n_total * 100) if n_total else 0
+
+    linhas += [
+        f"**Composição da base:** {n_geral:,} 'geral' ({n_geral/max(n_total,1):.1%}), "
+        f"{n_obras:,} 'obras' ({n_obras/max(n_total,1):.1%}), "
+        f"{n_eng:,} 'engenharia' ({n_eng/max(n_total,1):.1%}).",
+        "",
+        f"**Baseline a bater (F1-engenharia):** se {pct_eng:.1f}% das amostras "
+        f"são engenharia, um modelo aleatório atinge F1 ≈ {pct_eng/100:.2f}. "
+        f"Já um modelo trivial (sempre prevê 'geral') tem F1-engenharia = **0** — "
+        f"é o piso real.",
+        f"- Nosso F1-engenharia: **{f1_eng:.3f}** — "
+        f"{'acima do baseline aleatório' if f1_eng > pct_eng/100 else 'precisa melhorar'}",
+    ]
+
+    # Ground truth (se preenchido)
+    gt_path = config.caminho(config.SUB_P9, "ground_truth.json")
+    if gt_path.exists():
+        gt = ler_json(gt_path)
+        prec = gt.get("precisao", 0)
+        n_rev = gt.get("n_revisados", 0)
+        linhas += [
+            "",
+            f"**Validação manual ({n_rev} revisados):**",
+            f"- Subenquadramentos confirmados: {gt.get('subenquadrados', 0)}",
+            f"- Rotulação correta: {gt.get('corretos', 0)}",
+            f"- Duvidosos: {gt.get('duvidosos', 0)}",
+            f"- **Precisão da pipeline: {prec:.1%}** "
+            f"({'forte evidência' if prec > 0.7 else 'sinal moderado' if prec > 0.5 else 'baixa precisão — investigar'})",
+        ]
+
+    # Achados-chave
+    linhas += ["", "### Achados-chave", ""]
+    achados = []
+    if cnae and cnae.get("n_suspeitos_fortes"):
+        achados.append(
+            f"- **{cnae['n_suspeitos_fortes']:,} contratos 'geral' com "
+            f"fornecedor de CNAE engenharia** (CONFEA) — alta chance de "
+            f"subenquadramento."
+        )
+    if triagem:
+        d = triagem.get("distribuicao_triagem", {})
+        n_real = d.get("subenquadramento_real", 0)
+        if n_real:
+            achados.append(
+                f"- **{n_real:,} contratos com sinal de subenquadramento real** "
+                f"(óbvio engenharia + sem rito formal nos PDFs)."
+            )
+    if pdfs and pdfs.get("media_score"):
+        achados.append(
+            f"- Score médio de engenharia em PDFs analisados: "
+            f"{pdfs['media_score']:.2f}/9.0"
+        )
+    if grafos and grafos.get("red_flags_count"):
+        achados.append(
+            f"- {grafos['red_flags_count']} red flags no grafo "
+            f"órgão↔fornecedor (concentração suspeita)."
+        )
+    if not achados:
+        achados = ["(rode mais etapas do pipeline para gerar achados)"]
+    linhas += achados
+
+    # Nota sobre desbalanceamento (se aplicável)
+    if pct_eng < 10:
+        linhas += [
+            "",
+            "### ⚠ Nota sobre desbalanceamento",
+            "",
+            f"Apenas {pct_eng:.1f}% da base é 'engenharia'. Métricas de classes "
+            f"raras (F1, recall) tendem a ser baixas mesmo com bom modelo. "
+            f"Estratégias adotadas: `class_weight='balanced'`, oversampling "
+            f"(SMOTE opcional), bootstrap para IC.",
+        ]
+
     saida = config.caminho(config.SUB_P9, "relatorio.md")
     saida.write_text("\n".join(linhas), encoding="utf-8")
     print(f"[relatorio] markdown em {saida}")
@@ -321,6 +404,49 @@ GLOSSARIO = {
                                 "a Lei 14.133/2021.",
     "Outlier (anomalia)": "Contrato com características muito distintas dos seus "
                             "pares no cluster 'geral'. Candidato a subenquadramento.",
+    "Precisão": "P = VP / (VP + FP). Dos contratos que o pipeline marcou como "
+                "suspeitos, quantos são realmente subenquadramento? Mais alta = "
+                "menos falso alarme.",
+    "Recall (revocação)": "R = VP / (VP + FN). Dos contratos que SÃO subenquadramento "
+                            "(verdade), quantos o pipeline detectou? Mais alto = pega "
+                            "mais casos reais (a custo de mais falso alarme).",
+    "VP/FP/VN/FN": "Verdadeiro/Falso Positivo, Verdadeiro/Falso Negativo. "
+                     "Combinados, definem precisão, recall, F1 e acurácia.",
+    "Matriz de confusão": "Tabela 4×N classes mostrando previsões corretas (diagonal) "
+                            "e erradas (fora da diagonal). Visualiza onde o modelo "
+                            "se confunde.",
+    "Categoria PNCP": "Lei 14.133/2021 art. 6º. Categorias relevantes: 7=Obras, "
+                        "8=Serviços (Gerais), 9=Serviços de Engenharia.",
+    "Stratified sampling": "Amostragem que preserva proporções (por classe, órgão, "
+                            "ano…). Evita que a amostra seja enviesada para uma "
+                            "subpopulação.",
+    "Uncertainty sampling": "Active learning: para revisão humana, escolher os casos "
+                              "em que o modelo está MAIS INCERTO (prob ≈ 0.5), pois "
+                              "rotular esses é mais informativo que rotular óbvios.",
+    "Skip-if-exists": "Pular um passo do pipeline se o output dele já existe em "
+                        "disco. Use forcar=True para refazer mesmo se já rodou.",
+    "Snapshot": "Cópia congelada do estado de dados/ em dado momento. Use "
+                  "pncp.snapshot_auto() antes de Run all repetido para preservar.",
+    "Distant supervision": "Em vez de rotular manualmente, usar uma heurística "
+                              "(ex: regex de termos óbvios) para gerar rótulos fracos. "
+                              "Usado na triagem etapa 0.",
+    "Imbalanced classes": "Quando uma classe domina (ex: 80% 'geral' vs 6% "
+                            "'engenharia'). F1 baixo é matematicamente esperado. "
+                            "Comparar com baseline de classe majoritária.",
+    "Baseline majoritário": "Modelo trivial que sempre prevê a classe mais comum. "
+                              "Em 80% geral, ele acerta 80% das vezes (acurácia) mas "
+                              "F1 da classe minoritária = 0. Mede o piso real.",
+    "Subenquadramento real": "Contrato de engenharia rotulado 'geral' E que não "
+                                "seguiu o rito (ART/RRT, memorial, projeto). Viola "
+                                "a Lei 14.133/2021 + Lei 6.496/1977.",
+    "Mudança de escopo (Camada 3)": "Contrato original 'geral' que recebeu aditivo "
+                                       "com marcadores de engenharia. A licitação não "
+                                       "seguiu rito formal mas a execução incluiu "
+                                       "trabalho que exigiria.",
+    "Bootstrap": "Reamostragem com reposição (n vezes) para estimar IC de uma "
+                   "métrica. n=200 dá IC95% razoável; n=1000 é mais preciso.",
+    "ROC-AUC": "Área sob a curva ROC. 0.5 = aleatório, 1.0 = perfeito. Mede "
+                  "capacidade de ranking (independente de threshold).",
 }
 
 

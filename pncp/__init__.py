@@ -164,6 +164,17 @@ def keep_alive():
         print(f"[colab] keep-alive não pôde ser ativado: {e}")
 
 
+def snapshot_auto(prefixo="run", incluir_pdfs_cache=False):
+    """Snapshot com nome automático = prefixo_YYYY-MM-DD_HHMMSS.
+
+    Use no fim de cada Run all completo para preservar o estado antes de
+    rodar de novo com dados maiores (ex: depois de adicionar 2025-2026).
+    """
+    from datetime import datetime as _dt
+    nome = f"{prefixo}_{_dt.now().strftime('%Y-%m-%d_%H%M%S')}"
+    return snapshot(nome, incluir_pdfs_cache=incluir_pdfs_cache)
+
+
 def snapshot(nome, incluir_pdfs_cache=False):
     """
     Guarda uma cópia do estado atual de `dados/` numa subpasta

@@ -103,32 +103,20 @@ def eh_obvio_engenharia(texto):
 
 
 # ── Sinais de rito de engenharia (Lei 14.133/2021) ───────────────────────────
-# Estes sinais aparecem nos PDFs (Camada 2) ou em campos específicos do
-# contrato. A presença de 2+ sinais indica que o processo seguiu o rito
-# formal de engenharia, mesmo se o rótulo veio errado.
-SINAIS_RITO = (
-    "art",                         # Anotação de Responsabilidade Técnica
-    "rrt",                         # Registro de Responsabilidade Técnica
-    "memorial",                    # Memorial descritivo
-    "projeto_executivo",           # Projeto executivo
-    "as_built",                    # As-built
-    "crea",                        # CREA citado
-    "engenheiro",                  # Profissional eng. citado
-    "norma_tecnica",               # Norma técnica
-    "abnt_nbr",                    # ABNT NBR
-    "anotacao_responsabilidade",   # ART por extenso
-)
-LIMIAR_RITO = 2  # ≥2 sinais = rito seguido
+# Cada sinal corresponde a uma categoria de marcador em pncp/_marcadores.py
+# (mk_<NOME>_presente). Presença de ≥2 categorias = rito seguido.
+# Lei 6.496/1977 obriga ART; Lei 12.378/2010 obriga RRT.
+from pncp._marcadores import MARCADORES_ENGENHARIA as _MARC
+
+SINAIS_RITO = tuple(f"mk_{nome}_presente" for nome in _MARC.keys())
+LIMIAR_RITO = 2
 
 
 def contar_sinais_rito(linha_features_pdf):
-    """
-    Recebe uma linha do parquet de features de PDF (Camada 2) e
-    conta quantos sinais de rito apareceram.
-    """
+    """Conta quantas categorias de marcadores estão presentes no PDF."""
     if linha_features_pdf is None:
         return 0
-    return sum(int(linha_features_pdf.get(s, 0) or 0) > 0 for s in SINAIS_RITO)
+    return sum(bool(linha_features_pdf.get(s, False)) for s in SINAIS_RITO)
 
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
@@ -164,11 +152,13 @@ def executar(caminho_parquet=None):
         print("[triagem] cruzando com features de PDF (Camada 2)...")
         feats = ler_parquet(pdfs_path)
         df = df.merge(
-            feats[["numeroControlePNCP"] + list(SINAIS_RITO)],
+            feats[["numeroControlePNCP"] +
+                  [c for c in SINAIS_RITO if c in feats.columns]],
             on="numeroControlePNCP", how="left",
         )
         df["n_sinais_rito"] = (
-            df[list(SINAIS_RITO)].fillna(0).gt(0).sum(axis=1).astype("int8")
+            df[[c for c in SINAIS_RITO if c in df.columns]]
+              .fillna(False).astype(bool).sum(axis=1).astype("int8")
         )
         df["seguiu_rito"] = df["n_sinais_rito"] >= LIMIAR_RITO
     else:

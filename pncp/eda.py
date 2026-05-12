@@ -21,6 +21,17 @@ from pncp import config
 from pncp._plot import salvar_e_mostrar
 from pncp.io_disco import ler_parquet, salvar_json
 from pncp.ram import liberar
+from pncp.texto import STOPWORDS_PT
+
+
+def _agregar_rotulo(df):
+    """Adiciona coluna `rotulo_agg`: obras+engenharia juntos vs geral.
+    Útil quando a classe minoritária some sob a maioria nos gráficos."""
+    df = df.copy()
+    df["rotulo_agg"] = df["rotulo"].map(
+        lambda r: "obras+engenharia" if r in ("obras", "engenharia") else "geral"
+    )
+    return df
 
 
 # ── 1. Distribuição de rótulos ───────────────────────────────────────────────
@@ -51,15 +62,26 @@ def g_serie_temporal(df, pasta):
                           + df["mesPublicacao"].astype(int).astype(str).str.zfill(2))
     else:
         df["periodo"] = df["anoPublicacao"].astype(str)
-    cross = (df.groupby(["periodo", "rotulo"]).size()
+    cross = (df.groupby(["periodo", "rotulo"], observed=True).size()
              .unstack(fill_value=0).sort_index())
-    fig, ax = plt.subplots(figsize=(11, 4.5))
-    cross.plot(ax=ax, marker="o", markersize=4, linewidth=1.5)
-    ax.set_title("Evolução de contratos por rótulo")
-    ax.set_xlabel("período")
-    ax.set_ylabel("nº contratos")
-    plt.xticks(rotation=45)
-    ax.legend(title="rótulo", loc="best")
+    # Dois painéis: absoluto (log) + percentual — geral domina, então
+    # painel linear esmaga as outras classes
+    fig, axes = plt.subplots(1, 2, figsize=(15, 4.5))
+    cross.plot(ax=axes[0], marker="o", markersize=4, linewidth=1.5)
+    axes[0].set_yscale("log")
+    axes[0].set_title("Absoluto (escala log)")
+    axes[0].set_xlabel("período")
+    axes[0].set_ylabel("nº contratos")
+    axes[0].tick_params(axis="x", rotation=45)
+    axes[0].legend(title="rótulo", loc="best")
+
+    pct = cross.div(cross.sum(axis=1), axis=0) * 100
+    pct.plot(ax=axes[1], marker="o", markersize=4, linewidth=1.5)
+    axes[1].set_title("Composição (%) por período")
+    axes[1].set_xlabel("período")
+    axes[1].set_ylabel("% de contratos")
+    axes[1].tick_params(axis="x", rotation=45)
+    axes[1].legend(title="rótulo", loc="best")
     return salvar_e_mostrar(fig, pasta / "02_serie_temporal.png")
 
 
@@ -123,7 +145,7 @@ def g_comprimento_objeto(df, pasta):
     df = df.copy()
     df["len_obj"] = df["objeto"].astype(str).str.len()
     fig, ax = plt.subplots(figsize=(9, 4.5))
-    for rot, sub in df.groupby("rotulo"):
+    for rot, sub in df.groupby("rotulo", observed=True):
         if sub.empty:
             continue
         ax.hist(sub["len_obj"].clip(upper=2000), bins=40, alpha=0.5,
@@ -140,7 +162,8 @@ _RX_TOK = re.compile(r"[a-zA-ZÀ-ÿ]+")
 
 
 def _tokens(texto):
-    return [t.lower() for t in _RX_TOK.findall(str(texto)) if len(t) >= 3]
+    return [t.lower() for t in _RX_TOK.findall(str(texto))
+            if len(t) >= 3 and t.lower() not in STOPWORDS_PT]
 
 
 def g_frequencia_palavras(df, pasta, top_n=30, max_amostra=50_000):
@@ -210,14 +233,39 @@ def g_termos_eng_em_geral(df, pasta):
 def g_por_esfera(df, pasta):
     if "esferaNome" not in df.columns:
         return None
-    cross = (df.groupby(["esferaNome", "rotulo"]).size()
+    cross = (df.groupby(["esferaNome", "rotulo"], observed=True).size()
              .unstack(fill_value=0))
-    fig, ax = plt.subplots(figsize=(9, 4.5))
-    cross.plot.bar(ax=ax, stacked=False)
-    ax.set_title("Contratos por esfera de governo × rótulo")
-    ax.set_xlabel("esfera")
-    plt.xticks(rotation=0)
+    pct = cross.div(cross.sum(axis=1), axis=0) * 100
+    fig, axes = plt.subplots(1, 2, figsize=(14, 4.5))
+    cross.plot.bar(ax=axes[0], stacked=False)
+    axes[0].set_title("Absoluto: contratos por esfera × rótulo")
+    axes[0].set_xlabel("esfera")
+    axes[0].set_ylabel("nº contratos")
+    axes[0].tick_params(axis="x", rotation=0)
+
+    pct.plot.bar(ax=axes[1], stacked=True)
+    axes[1].set_title("% composição por esfera")
+    axes[1].set_xlabel("esfera")
+    axes[1].set_ylabel("% do total")
+    axes[1].tick_params(axis="x", rotation=0)
     return salvar_e_mostrar(fig, pasta / "10_por_esfera.png")
+
+
+def g_obras_eng_vs_geral(df, pasta):
+    """Visualiza obras+engenharia juntos vs geral. Útil quando obras
+    são poucas mas semanticamente próximas de engenharia."""
+    df = _agregar_rotulo(df)
+    cross = df["rotulo_agg"].value_counts()
+    fig, ax = plt.subplots(figsize=(6, 4))
+    bars = ax.bar(cross.index, cross.values,
+                   color=["#2ca02c", "#ff7f0e"])
+    for b, v in zip(bars, cross.values):
+        ax.text(b.get_x() + b.get_width() / 2, b.get_height(),
+                f"{v:,}\n({v / cross.sum():.1%})",
+                ha="center", va="bottom", fontsize=10)
+    ax.set_title("Engenharia + Obras vs. Serviços Gerais")
+    ax.set_ylabel("nº contratos")
+    return salvar_e_mostrar(fig, pasta / "11_obras_eng_vs_geral.png")
 
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
@@ -267,6 +315,7 @@ def executar(caminho_parquet=None, mostrar_inline=True):
         ("bigramas", g_bigramas),
         ("termos_eng_em_geral", g_termos_eng_em_geral),
         ("por_esfera", g_por_esfera),
+        ("obras_eng_vs_geral", g_obras_eng_vs_geral),
     ]:
         try:
             p = fn(df, pasta)
