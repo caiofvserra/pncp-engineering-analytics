@@ -277,21 +277,47 @@ def gerar_markdown():
         f"{'acima do baseline aleatório' if f1_eng > pct_eng/100 else 'precisa melhorar'}",
     ]
 
-    # Ground truth (se preenchido)
-    gt_path = config.caminho(config.SUB_P9, "ground_truth.json")
-    if gt_path.exists():
-        gt = ler_json(gt_path)
-        prec = gt.get("precisao", 0)
-        n_rev = gt.get("n_revisados", 0)
+    # Matriz de erro detalhada (cruzamento pipeline × revisão manual)
+    matriz_path = config.caminho(config.SUB_P9, "matriz_erro.json")
+    if matriz_path.exists():
+        me = ler_json(matriz_path)
         linhas += [
             "",
-            f"**Validação manual ({n_rev} revisados):**",
-            f"- Subenquadramentos confirmados: {gt.get('subenquadrados', 0)}",
-            f"- Rotulação correta: {gt.get('corretos', 0)}",
-            f"- Duvidosos: {gt.get('duvidosos', 0)}",
-            f"- **Precisão da pipeline: {prec:.1%}** "
-            f"({'forte evidência' if prec > 0.7 else 'sinal moderado' if prec > 0.5 else 'baixa precisão — investigar'})",
+            "**Matriz de erro (pipeline × revisão manual):**",
+            "",
+            "| Categoria | Contagem | Significado |",
+            "|---|---|---|",
+            f"| VP (verdadeiro positivo) | {me.get('VP_verdadeiro_positivo', 0)} | "
+            f"Pipeline marcou e é mesmo subenquadramento — ✅ acertou |",
+            f"| FP (falso positivo)     | {me.get('FP_falso_positivo', 0)} | "
+            f"Pipeline marcou mas é ok — ⚠ falso alarme |",
+            f"| FN (falso negativo)     | {me.get('FN_falso_negativo', 0)} | "
+            f"Pipeline NÃO marcou mas é subenq — ❌ vacilo grave |",
+            f"| VN (verdadeiro negativo)| {me.get('VN_verdadeiro_negativo', 0)} | "
+            f"Pipeline não marcou e é ok — ✅ correto |",
+            "",
+            f"- **Precisão**: {me.get('precisao', 0):.1%} "
+            f"(dos suspeitos do pipeline, quantos são reais)",
+            f"- **Recall**: {me.get('recall', 0):.1%} "
+            f"(dos subenq reais, quantos o pipeline pegou)",
+            f"- **F1**: {me.get('f1', 0):.3f}",
+            f"- **Acurácia**: {me.get('acuracia', 0):.1%}",
         ]
+    else:
+        # Ground truth simples (se só houver precisão básica)
+        gt_path = config.caminho(config.SUB_P9, "ground_truth.json")
+        if gt_path.exists():
+            gt = ler_json(gt_path)
+            prec = gt.get("precisao", 0)
+            n_rev = gt.get("n_revisados", 0)
+            linhas += [
+                "",
+                f"**Validação manual ({n_rev} revisados):**",
+                f"- Subenquadramentos confirmados: {gt.get('subenquadrados', 0)}",
+                f"- Rotulação correta: {gt.get('corretos', 0)}",
+                f"- Duvidosos: {gt.get('duvidosos', 0)}",
+                f"- **Precisão da pipeline: {prec:.1%}**",
+            ]
 
     # Achados-chave
     linhas += ["", "### Achados-chave", ""]
@@ -459,15 +485,149 @@ def glossario(termo=None):
 
 
 # ── Pipeline principal ──────────────────────────────────────────────────────
+def exportar_suspeitos_completo():
+    """
+    Gera a LISTA COMPLETA de suspeitos consolidados em CSV + XLSX,
+    estratificada por nível de confiança. Inclui todas as evidências
+    (ML prob, marcadores, CNAE, aditivos) para uso jurídico/auditorial.
+
+    Saídas em dados/relatorio/:
+      - suspeitos_completos.csv      (todos os contratos 'geral' avaliados)
+      - suspeitos_alta_confianca.csv (subset: >= 3 sinais positivos)
+      - suspeitos_completos.xlsx     (mesmo conteúdo, formato planilha)
+    """
+    p = config.caminho(config.SUB_P9, "suspeitos_consolidados.parquet")
+    if not Path(p).exists():
+        print("[exportar] rode pncp.relatorio.gerar() primeiro")
+        return None
+    df = ler_parquet(p)
+    if df.empty:
+        print("[exportar] nenhum suspeito consolidado")
+        return None
+
+    # Categoriza por nível de confiança
+    n_sinais = df.get("n_sinais", 0)
+    df["nivel_confianca"] = pd.cut(
+        n_sinais,
+        bins=[-0.1, 0, 1, 2, 99],
+        labels=["sem_sinal", "fraco_1", "moderado_2", "forte_3+"],
+    )
+
+    # CSV completo
+    saida_csv = config.caminho(config.SUB_P9, "suspeitos_completos.csv")
+    df.to_csv(saida_csv, index=False, encoding="utf-8-sig")
+    print(f"[exportar] CSV completo: {saida_csv} ({len(df):,} linhas)")
+
+    # Subset alta confiança
+    alta = df[df["nivel_confianca"] == "forte_3+"]
+    if not alta.empty:
+        saida_alta = config.caminho(config.SUB_P9,
+                                      "suspeitos_alta_confianca.csv")
+        alta.to_csv(saida_alta, index=False, encoding="utf-8-sig")
+        print(f"[exportar] alta confiança (≥3 sinais): {saida_alta} "
+              f"({len(alta):,} linhas)")
+
+    # XLSX para revisão fácil (se openpyxl estiver disponível)
+    try:
+        saida_xlsx = config.caminho(config.SUB_P9, "suspeitos_completos.xlsx")
+        with pd.ExcelWriter(saida_xlsx, engine="openpyxl") as wr:
+            df.to_excel(wr, sheet_name="todos", index=False)
+            if not alta.empty:
+                alta.to_excel(wr, sheet_name="alta_confianca", index=False)
+        print(f"[exportar] XLSX: {saida_xlsx}")
+    except Exception as e:
+        print(f"[exportar] XLSX falhou (openpyxl ausente?): {e}")
+
+    return saida_csv
+
+
+def gerar_matriz_erro():
+    """
+    Cruza predições do pipeline com revisão manual (ground truth) e
+    calcula matriz de confusão jurídica: VP, FP, VN, FN.
+
+    Salva tabela com nivel_de_erro por contrato revisado.
+    """
+    p_gt = config.caminho(config.SUB_P8, "amostra_revisao_manual.csv")
+    p_susp = config.caminho(config.SUB_P9, "suspeitos_consolidados.parquet")
+    if not Path(p_gt).exists() or not Path(p_susp).exists():
+        return None
+    gt = pd.read_csv(p_gt)
+    if "revisao_manual" not in gt.columns:
+        return None
+    gt = gt[gt["revisao_manual"].fillna("").astype(str).ne("")]
+    if gt.empty:
+        return None
+
+    susp = ler_parquet(p_susp)
+    # Suspeito = contrato com ≥1 sinal positivo no pipeline
+    susp["pipeline_suspeito"] = susp.get("n_sinais", 0) >= 1
+    gt_m = gt.merge(
+        susp[["numeroControlePNCP", "pipeline_suspeito", "n_sinais"]],
+        on="numeroControlePNCP", how="left",
+    )
+    gt_m["pipeline_suspeito"] = gt_m["pipeline_suspeito"].fillna(False)
+    gt_m["realmente_subenq"] = gt_m["revisao_manual"] == "subenq"
+
+    def _tipo(r):
+        if r["pipeline_suspeito"] and r["realmente_subenq"]:
+            return "VP (acerto: subenq detectado)"
+        if r["pipeline_suspeito"] and not r["realmente_subenq"]:
+            return "FP (falso alarme: ok mas pipeline marcou)"
+        if not r["pipeline_suspeito"] and r["realmente_subenq"]:
+            return "FN (vacilo: subenq mas pipeline NÃO detectou)"
+        return "VN (correto: ok e pipeline também)"
+
+    gt_m["tipo_erro"] = gt_m.apply(_tipo, axis=1)
+    cont = gt_m["tipo_erro"].value_counts()
+    vp = int((gt_m["tipo_erro"].str.startswith("VP")).sum())
+    fp = int((gt_m["tipo_erro"].str.startswith("FP")).sum())
+    fn = int((gt_m["tipo_erro"].str.startswith("FN")).sum())
+    vn = int((gt_m["tipo_erro"].str.startswith("VN")).sum())
+
+    metricas = {
+        "VP_verdadeiro_positivo": vp,
+        "FP_falso_positivo": fp,
+        "FN_falso_negativo": fn,
+        "VN_verdadeiro_negativo": vn,
+        "precisao": vp / max(vp + fp, 1),
+        "recall": vp / max(vp + fn, 1),
+        "f1": 2 * vp / max(2 * vp + fp + fn, 1),
+        "acuracia": (vp + vn) / max(vp + vn + fp + fn, 1),
+        "contagem_por_tipo": cont.to_dict(),
+    }
+    saida = config.caminho(config.SUB_P9, "matriz_erro.json")
+    salvar_json(metricas, saida)
+    # CSV com classificação por contrato (para inspeção)
+    gt_m[["numeroControlePNCP", "objeto", "revisao_manual",
+            "pipeline_suspeito", "n_sinais", "tipo_erro"]].to_csv(
+        config.caminho(config.SUB_P9, "matriz_erro_por_contrato.csv"),
+        index=False, encoding="utf-8-sig",
+    )
+    print(f"[matriz_erro] VP={vp}, FP={fp}, FN={fn}, VN={vn}")
+    print(f"   precisão={metricas['precisao']:.3f}, "
+          f"recall={metricas['recall']:.3f}, "
+          f"F1={metricas['f1']:.3f}")
+    return metricas
+
+
 @com_gc
 def gerar():
-    """Roda consolidação + estatísticas + markdown final."""
+    """Roda consolidação + estatísticas + markdown final + matriz de erro."""
     from pncp.ram import precisa_de
     if not precisa_de(config.caminho(config.SUB_COLETA, "contratos.parquet"),
                        "relatorio",
                        "rode pncp.coleta.coletar(...) primeiro"):
         return None
     consolidar()
+    try:
+        exportar_suspeitos_completo()
+    except Exception as e:
+        print(f"[relatorio] export completo falhou: {e}")
+    try:
+        gerar_matriz_erro()
+    except Exception as e:
+        print(f"[relatorio] matriz_erro falhou: {e}")
     salvar_json(estatisticas(),
                  config.caminho(config.SUB_P9, "estatisticas.json"))
     return gerar_markdown()

@@ -289,22 +289,24 @@ def executar(caminho_parquet=None,
              n_estimators_rf=100,
              cv_folds=3,
              max_amostras_treino=300_000,
+             holdout_anos=None,
              forcar=False):
     """
     Pipeline completo: TF-IDF (carregado do disco) → treino → avaliação →
     ranking → persistência.
 
     Args:
-      forcar: se True, ignora resultado anterior e re-treina. Default False
-              (skip se já existe metricas.json + ranking.parquet).
+      holdout_anos: lista de anos (ex: [2026]) para usar como TESTE.
+                    Treina apenas em contratos dos OUTROS anos. Útil para
+                    validar generalização temporal — "se o modelo aprendeu
+                    com 2024-25, ele funciona em 2026?". Quando None, usa
+                    holdout estratificado aleatório (padrão).
       n_bootstrap: nº de re-amostragens para IC. 200 dá IC bom; 1000 é mais
                    preciso mas 5× mais lento.
       n_estimators_rf: árvores no Random Forest. 100 é bom; 200 pouco ganho.
       cv_folds: 3 (rápido) vs 5 (mais preciso, mais lento).
-      max_amostras_treino: se o dataset for maior que isso, usa subsample
-                           ESTRATIFICADO para treino (preserva proporção
-                           dos rótulos). None = usa tudo. Para 1M+ linhas,
-                           subsample reduz tempo em ~3× sem perda significativa.
+      max_amostras_treino: subsample estratificado p/ treino se > N linhas.
+      forcar: True ignora resultado anterior e re-treina.
     """
     from pncp.ram import precisa_de
     if caminho_parquet is None:
@@ -354,7 +356,36 @@ def executar(caminho_parquet=None,
 
     metricas = {}
 
-    if fazer_holdout:
+    if holdout_anos:
+        # Validação temporal: anos do holdout viram teste; resto treino.
+        # Mostra se o modelo generaliza para o futuro (não só média geral).
+        labels_meta = artefatos["labels"]
+        if "anoPublicacao" not in labels_meta.columns:
+            # Tenta carregar do parquet de coleta
+            df_anos = ler_parquet(caminho_parquet,
+                                    colunas=["anoPublicacao"])
+            anos_arr = df_anos["anoPublicacao"].fillna(-1).astype(int).values
+        else:
+            anos_arr = labels_meta["anoPublicacao"].fillna(-1).astype(int).values
+        if len(anos_arr) != X.shape[0]:
+            # Após subsample, anos_arr está desalinhado; recarrega filtrando
+            anos_arr = anos_arr[:X.shape[0]]
+        mask_te = pd.Series(anos_arr).isin(holdout_anos).values
+        if mask_te.sum() < 10 or (~mask_te).sum() < 10:
+            print(f"[clf] holdout temporal inválido (treino={(~mask_te).sum()}, "
+                  f"teste={mask_te.sum()}) — caindo no holdout aleatório")
+            X_tr, X_te, y_tr, y_te = train_test_split(
+                X, y, test_size=config.TEST_SIZE,
+                random_state=config.SEED, stratify=y,
+            )
+        else:
+            X_tr, X_te = X[~mask_te], X[mask_te]
+            y_tr, y_te = y[~mask_te], y[mask_te]
+            print(f"[clf] holdout temporal — treino={X_tr.shape[0]:,} "
+                  f"(outros anos), teste={X_te.shape[0]:,} (anos "
+                  f"{holdout_anos})")
+            metricas["holdout_anos"] = list(holdout_anos)
+    elif fazer_holdout:
         X_tr, X_te, y_tr, y_te = train_test_split(
             X, y, test_size=config.TEST_SIZE, random_state=config.SEED, stratify=y,
         )

@@ -251,6 +251,87 @@ def g_por_esfera(df, pasta):
     return salvar_e_mostrar(fig, pasta / "10_por_esfera.png")
 
 
+def g_marcadores_por_rotulo(pasta):
+    """
+    Insight central do TCC: % de contratos COM cada categoria de marcador
+    (ART/RRT/CREA/…) por rótulo. Esperamos:
+      - obras/engenharia: 50-80% têm marcadores
+      - geral: idealmente 0%, na prática alguns % = subenquadramento
+    """
+    from pncp.io_disco import ler_parquet as _ler
+    pdfs_path = config.caminho(config.SUB_C2, "features_pdfs.parquet")
+    consol_path = config.caminho(config.SUB_COLETA, "contratos.parquet")
+    if not pdfs_path.exists() or not consol_path.exists():
+        return None
+    feats = _ler(pdfs_path)
+    base = _ler(consol_path, colunas=["numeroControlePNCP", "rotulo"])
+    df_u = base.merge(feats, on="numeroControlePNCP", how="inner")
+    cols_pres = [c for c in df_u.columns if c.endswith("_presente")]
+    if not cols_pres or df_u.empty:
+        return None
+    res = (df_u.groupby("rotulo", observed=True)[cols_pres]
+            .mean().mul(100).round(1))
+    res.columns = [c.replace("mk_", "").replace("_presente", "")
+                    for c in res.columns]
+    fig, ax = plt.subplots(figsize=(13, 5))
+    res.T.plot.bar(ax=ax, edgecolor="white", width=0.85)
+    ax.set_title("% de contratos COM cada marcador legal, por rótulo\n"
+                 "Lei 6.496/1977: ART obrigatória em qualquer atividade "
+                 "de engenharia")
+    ax.set_xlabel("Categoria de marcador (ART, RRT, CREA, ...)")
+    ax.set_ylabel("% contratos com marcador (entre os com PDF analisado)")
+    ax.tick_params(axis="x", rotation=30)
+    ax.legend(title="rótulo original")
+    return salvar_e_mostrar(fig, pasta / "12_marcadores_por_rotulo.png")
+
+
+def estabilidade_temporal(caminho_parquet=None):
+    """
+    Mostra como a distribuição de rótulos muda por ano. Se a % de
+    'geral' subir entre anos sem motivo claro, pode indicar mudança de
+    critério de cadastro (não da realidade dos contratos).
+
+    Salva dados/eda/estabilidade_temporal.json + gráfico.
+    """
+    from pncp.io_disco import ler_parquet as _ler
+    if caminho_parquet is None:
+        caminho_parquet = config.caminho(config.SUB_COLETA, "contratos.parquet")
+    df = _ler(caminho_parquet)
+    if "anoPublicacao" not in df.columns:
+        return None
+    df = df.dropna(subset=["anoPublicacao"]).copy()
+    df["anoPublicacao"] = df["anoPublicacao"].astype(int)
+
+    pasta = config.caminho(config.SUB_EDA, ".").parent
+    cross_n = (df.groupby(["anoPublicacao", "rotulo"], observed=True)
+               .size().unstack(fill_value=0))
+    cross_pct = cross_n.div(cross_n.sum(axis=1), axis=0) * 100
+
+    fig, axes = plt.subplots(1, 2, figsize=(15, 4.5))
+    cross_pct.plot.bar(ax=axes[0], stacked=True, width=0.85)
+    axes[0].set_title("Composição (%) por ano")
+    axes[0].set_ylabel("% do total")
+    axes[0].tick_params(axis="x", rotation=0)
+    valores = df.groupby("anoPublicacao", observed=True)["valor"].sum() if "valor" in df.columns else None
+    if valores is not None:
+        valores.plot.bar(ax=axes[1], color="#9467bd", edgecolor="white")
+        axes[1].set_title("Valor total contratado por ano (R$)")
+        axes[1].tick_params(axis="x", rotation=0)
+    saida = salvar_e_mostrar(fig, pasta / "13_estabilidade_temporal.png")
+
+    relatorio = {
+        "n_por_ano": cross_n.to_dict(),
+        "pct_por_ano": cross_pct.round(1).to_dict(),
+        "alerta_drift": [
+            int(a) for a in cross_pct.index
+            if cross_pct.loc[a].get("geral", 0) > 80
+        ],
+    }
+    salvar_json(relatorio,
+                 config.caminho(config.SUB_EDA, "estabilidade_temporal.json"))
+    return saida
+
+
 def g_obras_eng_vs_geral(df, pasta):
     """Visualiza obras+engenharia juntos vs geral. Útil quando obras
     são poucas mas semanticamente próximas de engenharia."""
@@ -323,6 +404,22 @@ def executar(caminho_parquet=None, mostrar_inline=True):
                 relatorio["graficos"][nome] = str(p)
         except Exception as e:
             print(f"[eda] {nome} falhou: {type(e).__name__}: {e}")
+
+    # Marcadores por rótulo (só roda se Camada 2 já gerou dados)
+    try:
+        p = g_marcadores_por_rotulo(pasta)
+        if p:
+            relatorio["graficos"]["marcadores_por_rotulo"] = str(p)
+    except Exception as e:
+        print(f"[eda] marcadores_por_rotulo falhou: {e}")
+
+    # Estabilidade temporal (composição por ano)
+    try:
+        p = estabilidade_temporal(caminho_parquet)
+        if p:
+            relatorio["graficos"]["estabilidade_temporal"] = str(p)
+    except Exception as e:
+        print(f"[eda] estabilidade_temporal falhou: {e}")
 
     # Detecta viés temporal
     if "anoPublicacao" in df.columns and df["anoPublicacao"].notna().any():

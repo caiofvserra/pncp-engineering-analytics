@@ -94,7 +94,16 @@ def construir_tfidf(caminho_parquet, caminho_saida=None, forcar=False):
               f"(use forcar=True para refazer)")
         return None
 
-    df = ler_parquet(caminho_parquet, colunas=["objeto_limpo", "rotulo"])
+    # Inclui anoPublicacao em labels p/ permitir holdout temporal
+    cols_labels = ["objeto_limpo", "rotulo"]
+    df_check = ler_parquet(caminho_parquet, colunas=["rotulo"])
+    if not df_check.empty:
+        try:
+            ler_parquet(caminho_parquet, colunas=["anoPublicacao"])
+            cols_labels.append("anoPublicacao")
+        except Exception:
+            pass
+    df = ler_parquet(caminho_parquet, colunas=cols_labels)
     if df.empty:
         print("[texto] parquet vazio — pulando TF-IDF")
         return None
@@ -111,7 +120,9 @@ def construir_tfidf(caminho_parquet, caminho_saida=None, forcar=False):
     paths = {
         "X": salvar_sparse(X, caminho_saida / "X.npz"),
         "vec": salvar_modelo(vec, caminho_saida / "vectorizer.joblib"),
-        "labels": salvar_parquet(df[["rotulo"]], caminho_saida / "labels.parquet"),
+        "labels": salvar_parquet(
+            df[[c for c in ("rotulo", "anoPublicacao") if c in df.columns]],
+            caminho_saida / "labels.parquet"),
     }
     liberar(df, X, vec)
     return paths
