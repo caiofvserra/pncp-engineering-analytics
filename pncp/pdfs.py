@@ -73,6 +73,35 @@ def _baixar(cnpj, ano, seq, seq_doc, destino, tipo_recurso="compras"):
         return False
 
 
+def descobrir_documentos(num_controle_pncp):
+    """
+    Função de debug: lista os documentos de UM contrato específico.
+    Use para confirmar que o endpoint está respondendo corretamente.
+
+    Ex: pncp.pdfs.descobrir_documentos("12345678000199-1-000123/2024")
+    """
+    info = _decompor_ncp(num_controle_pncp)
+    if not info:
+        print(f"❌ numeroControlePNCP inválido: {num_controle_pncp}")
+        return None
+    recurso = "compras" if info["tipo"] == 1 else "contratos"
+    docs = _listar_documentos(info["cnpj"], info["ano"],
+                                info["sequencial"], recurso)
+    print(f"\n🔍 {num_controle_pncp}")
+    print(f"   CNPJ={info['cnpj']} ano={info['ano']} seq={info['sequencial']}")
+    print(f"   recurso={recurso}  → {len(docs)} doc(s):")
+    for d in docs:
+        seq_doc = d.get("sequencialDocumento") or d.get("sequencial", "?")
+        tipo_id = d.get("tipoDocumentoId")
+        tipo_nm = (d.get("tipoDocumentoNome")
+                    or MAPA_TIPO_DOCUMENTO.get(tipo_id, "Outro"))
+        titulo = (d.get("titulo") or "")[:60]
+        ativo = d.get("statusAtivo", True)
+        print(f"      [{seq_doc}] tipo={tipo_id} ({tipo_nm}): {titulo} "
+              f"{'✓' if ativo else '✗'}")
+    return docs
+
+
 def _path_cache_pdf(num_controle, seq_doc):
     pasta = config.caminho(config.SUB_C2, "cache_pdfs")
     nome = num_controle.replace("/", "_") + f"_{seq_doc}.pdf"
@@ -136,7 +165,7 @@ def extrair_texto(caminho, min_chars=200):
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
 @com_gc
-def executar(caminho_parquet=None, max_contratos=200, ranking_path=None,
+def executar(caminho_parquet=None, max_contratos=1000, ranking_path=None,
              tipos_aceitos=None, apenas_geral_obvio=True):
     """
     tipos_aceitos: tipoDocumentoId a baixar. Default = TIPOS_RELEVANTES_ENGENHARIA.
@@ -267,6 +296,11 @@ def executar(caminho_parquet=None, max_contratos=200, ranking_path=None,
     feats = pd.DataFrame(registros)
     print(f"[pdfs] {len(feats)} PDFs processados ({n_baixados} novos, "
           f"{n_cache_hit} cache, {n_sem_doc} contratos sem doc)")
+    # Diagnóstico granular: distribuição por tipo de doc
+    if "tipoDocumentoNome" in feats.columns:
+        print(f"[pdfs] distribuição por tipo:")
+        for nome, n in feats["tipoDocumentoNome"].value_counts().items():
+            print(f"     {nome:30s}: {n:>4d}")
 
     # Agrega por contrato — soma marcadores, max do score, lista tipos
     agg_dict = {

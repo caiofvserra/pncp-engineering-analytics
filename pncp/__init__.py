@@ -40,6 +40,7 @@ _LAZY = {
     "triagem", "outliers",
     "classificacao", "avancado",
     "embeddings", "grafos", "cnae", "pdfs", "aditivos", "relatorio",
+    "llm",
     "spark_extras",
 }
 
