@@ -44,25 +44,33 @@ def _decompor_ncp(num_controle):
 
 
 # ── API de integração — listagem e download ─────────────────────────────────
-def _listar_documentos(cnpj, ano, seq, tipo_recurso="compras"):
-    """API de integração; timeout curto + 1 retry para não pendurar a célula."""
+def _listar_documentos(cnpj, ano, seq, tipo_recurso="compras",
+                        timeout=None):
+    """
+    Retorna (documentos, status):
+      status="ok"               → API respondeu com sucesso (lista pode ser vazia)
+      status="timeout"          → não sabemos se tem doc; vale re-tentar depois
+      status="erro_4xx"/"5xx"   → falha de servidor, pula
+    """
+    timeout = timeout or config.PDFS_TIMEOUT
     url = (f"{config.API_INTEGRACAO}/v1/orgaos/{cnpj}/{tipo_recurso}/"
            f"{ano}/{seq}/arquivos")
     for tentativa in range(2):
         try:
-            r = requests.get(url, timeout=config.PDFS_TIMEOUT)
+            r = requests.get(url, timeout=timeout)
             if r.status_code != 200:
-                return []
+                return [], f"erro_{r.status_code}"
             payload = r.json()
-            return (payload if isinstance(payload, list)
+            docs = (payload if isinstance(payload, list)
                     else payload.get("data", []))
+            return docs, "ok"
         except requests.exceptions.Timeout:
             if tentativa == 0:
                 continue
-            return []
+            return [], "timeout"
         except Exception:
-            return []
-    return []
+            return [], "erro_conexao"
+    return [], "timeout"
 
 
 def _baixar(cnpj, ano, seq, seq_doc, destino, tipo_recurso="compras"):
@@ -94,11 +102,11 @@ def descobrir_documentos(num_controle_pncp):
         print(f"❌ numeroControlePNCP inválido: {num_controle_pncp}")
         return None
     recurso = "compras" if info["tipo"] == 1 else "contratos"
-    docs = _listar_documentos(info["cnpj"], info["ano"],
-                                info["sequencial"], recurso)
+    docs, status = _listar_documentos(info["cnpj"], info["ano"],
+                                        info["sequencial"], recurso)
     print(f"\n🔍 {num_controle_pncp}")
     print(f"   CNPJ={info['cnpj']} ano={info['ano']} seq={info['sequencial']}")
-    print(f"   recurso={recurso}  → {len(docs)} doc(s):")
+    print(f"   recurso={recurso} status={status}  → {len(docs)} doc(s):")
     for d in docs:
         seq_doc = d.get("sequencialDocumento") or d.get("sequencial", "?")
         tipo_id = d.get("tipoDocumentoId")
@@ -244,17 +252,47 @@ def executar(caminho_parquet=None, max_contratos=1000, ranking_path=None,
 
     registros = []
     n_sem_doc = n_baixados = n_cache_hit = 0
+    n_timeout = n_erro = 0
+    # Persiste lista de timeouts p/ retentar depois com pncp.pdfs.retentar_falhas()
+    diagnostico = {"confirmados_sem_doc": [], "timeout_listagem": [],
+                    "erro_servidor": []}
+    diag_path = config.caminho(config.SUB_C2, "pdfs_diagnostico.json")
+    # Carrega lista anterior de "confirmados sem doc" — pula esses (já sabemos)
+    confirmados_sem_doc_prev = set()
+    if diag_path.exists():
+        try:
+            from pncp.io_disco import ler_json
+            d_prev = ler_json(diag_path)
+            confirmados_sem_doc_prev = set(d_prev.get("confirmados_sem_doc", []))
+            if confirmados_sem_doc_prev:
+                print(f"[pdfs] pulando {len(confirmados_sem_doc_prev)} contratos "
+                      f"já confirmados sem-doc em run anterior")
+        except Exception:
+            pass
 
     for i, ncp in _iter:
         info = _decompor_ncp(ncp)
         if not info or info["tipo"] not in (1, 2):
             continue
+        if ncp in confirmados_sem_doc_prev:
+            n_sem_doc += 1
+            continue
 
         recurso = "compras" if info["tipo"] == 1 else "contratos"
-        docs = _listar_documentos(info["cnpj"], info["ano"],
-                                    info["sequencial"], recurso)
+        docs, status = _listar_documentos(info["cnpj"], info["ano"],
+                                            info["sequencial"], recurso)
+        if status == "timeout":
+            n_timeout += 1
+            diagnostico["timeout_listagem"].append(ncp)
+            continue
+        if status.startswith("erro"):
+            n_erro += 1
+            diagnostico["erro_servidor"].append(ncp)
+            continue
         if not docs:
+            # status="ok" e lista vazia = confirmadamente sem doc no PNCP
             n_sem_doc += 1
+            diagnostico["confirmados_sem_doc"].append(ncp)
             continue
 
         # Filtra por tipo (só TR/PB/ETP/Edital/etc.)
@@ -304,17 +342,33 @@ def executar(caminho_parquet=None, max_contratos=1000, ranking_path=None,
         if i % 50 == 0:
             print(f"\n[pdfs] {i}/{len(ncps)} | "
                   f"baixados={n_baixados}, cache={n_cache_hit}, "
-                  f"sem-doc={n_sem_doc}, com-features={len(registros)}")
+                  f"sem-doc={n_sem_doc}, timeout={n_timeout}, "
+                  f"erro={n_erro}, com-features={len(registros)}")
             monitorar_ram(f"PDFs {i}")
+            # Salva diagnóstico parcial para sobreviver a interrupções
+            salvar_json(diagnostico, diag_path)
+
+    # Salva diagnóstico final
+    salvar_json(diagnostico, diag_path)
+
+    if n_timeout > 0:
+        print(f"\n[pdfs] ⚠ {n_timeout} contratos deram TIMEOUT — não sabemos "
+              f"se têm doc. Rode `pncp.pdfs.retentar_falhas()` p/ tentar "
+              f"de novo com timeout maior.")
+    if n_erro > 0:
+        print(f"[pdfs] ⚠ {n_erro} contratos com erro de servidor "
+              f"(salvos em pdfs_diagnostico.json)")
 
     if not registros:
         print(f"[pdfs] nenhum PDF processado | sem-doc={n_sem_doc}, "
-              f"cache={n_cache_hit}, baixados={n_baixados}")
+              f"cache={n_cache_hit}, baixados={n_baixados}, "
+              f"timeout={n_timeout}")
         return None
 
     feats = pd.DataFrame(registros)
     print(f"[pdfs] {len(feats)} PDFs processados ({n_baixados} novos, "
-          f"{n_cache_hit} cache, {n_sem_doc} contratos sem doc)")
+          f"{n_cache_hit} cache, {n_sem_doc} confirmados sem doc, "
+          f"{n_timeout} timeouts)")
     # Diagnóstico granular: distribuição por tipo de doc
     if "tipoDocumentoNome" in feats.columns:
         print(f"[pdfs] distribuição por tipo:")
@@ -367,3 +421,120 @@ def executar(caminho_parquet=None, max_contratos=1000, ranking_path=None,
     print(f"[pdfs] {len(agg)} contratos com features → {saida}")
     liberar(df, feats)
     return saida
+
+
+def retentar_falhas(timeout_listagem=45):
+    """
+    Re-processa apenas os contratos que deram TIMEOUT na sessão anterior,
+    desta vez com timeout maior (default 45s vs 15s padrão).
+
+    Útil quando você suspeita que a API estava sobrecarregada num momento
+    específico e quer recuperar dados de contratos que parecem "sem doc"
+    mas na verdade são "não-sabemos-se-tem-doc".
+
+    Os contratos confirmados como "sem doc" (API respondeu 200 com lista
+    vazia) NÃO são re-tentados — sabemos definitivamente que não têm.
+    """
+    from pncp.io_disco import ler_json
+    diag_path = config.caminho(config.SUB_C2, "pdfs_diagnostico.json")
+    if not Path(diag_path).exists():
+        print("[retentar] sem pdfs_diagnostico.json — rode pncp.pdfs.executar() antes")
+        return None
+    diag = ler_json(diag_path)
+    pendentes = diag.get("timeout_listagem", [])
+    if not pendentes:
+        print("[retentar] nenhum timeout pendente")
+        return None
+
+    print(f"[retentar] {len(pendentes)} contratos com timeout — re-tentando "
+          f"com timeout={timeout_listagem}s")
+
+    try:
+        from tqdm.auto import tqdm as _tqdm
+        _iter = _tqdm(pendentes, desc="🔄 Retentar", unit="contrato")
+    except ImportError:
+        _iter = pendentes
+
+    novos_sucesso = 0
+    novos_timeout = 0
+    novos_sem_doc = 0
+    timeout_restante = []
+
+    registros = []
+    for ncp in _iter:
+        info = _decompor_ncp(ncp)
+        if not info or info["tipo"] not in (1, 2):
+            continue
+        recurso = "compras" if info["tipo"] == 1 else "contratos"
+        docs, status = _listar_documentos(info["cnpj"], info["ano"],
+                                            info["sequencial"], recurso,
+                                            timeout=timeout_listagem)
+        if status == "timeout":
+            novos_timeout += 1
+            timeout_restante.append(ncp)
+            continue
+        if not docs:
+            novos_sem_doc += 1
+            diag.setdefault("confirmados_sem_doc", []).append(ncp)
+            continue
+        novos_sucesso += 1
+        # Baixa e processa (mesma lógica de executar)
+        for d in docs[:3]:
+            seq_doc = d.get("sequencialDocumento") or d.get("sequencial")
+            if not seq_doc:
+                continue
+            cache = _path_cache_pdf(ncp, seq_doc)
+            if not cache.exists():
+                if not _baixar(info["cnpj"], info["ano"], info["sequencial"],
+                                 seq_doc, cache, recurso):
+                    continue
+                time.sleep(0.3)
+            texto = normalizar_pdf_text(extrair_texto(cache))
+            marc = detectar_marcadores(texto)
+            registros.append({
+                "numeroControlePNCP": ncp,
+                "seq_doc": seq_doc,
+                "tipoDocumentoId": d.get("tipoDocumentoId"),
+                "tipoDocumentoNome": d.get("tipoDocumentoNome",
+                                            MAPA_TIPO_DOCUMENTO.get(
+                                                d.get("tipoDocumentoId"),
+                                                "Outro")),
+                "n_chars": len(texto), **marc,
+            })
+
+    diag["timeout_listagem"] = timeout_restante
+    salvar_json(diag, diag_path)
+    print(f"[retentar] sucesso={novos_sucesso}, sem-doc={novos_sem_doc}, "
+          f"ainda em timeout={novos_timeout}")
+
+    # Mescla os novos registros com features_pdfs existente
+    if registros:
+        feats = pd.DataFrame(registros)
+        agg_dict = {
+            "n_pdfs": ("seq_doc", "count"),
+            "chars_total": ("n_chars", "sum"),
+            "tipos_doc": ("tipoDocumentoNome",
+                          lambda s: " | ".join(sorted(set(s.dropna())))),
+        }
+        for c in COLS_MARCADORES:
+            if c in feats.columns:
+                agg_dict[c] = (c, "sum")
+        for c in COLS_PRESENCA:
+            if c in feats.columns:
+                agg_dict[c] = (c, "any")
+        agg = feats.groupby("numeroControlePNCP").agg(**agg_dict).reset_index()
+        cols_pres_existem = [c for c in COLS_PRESENCA if c in agg.columns]
+        if cols_pres_existem:
+            agg["mk_score_engenharia"] = agg[cols_pres_existem].sum(axis=1)
+
+        saida = config.caminho(config.SUB_C2, "features_pdfs.parquet")
+        if Path(saida).exists():
+            ant = ler_parquet(saida)
+            mantidos = ant[~ant["numeroControlePNCP"]
+                              .isin(agg["numeroControlePNCP"])]
+            agg = pd.concat([mantidos, agg], ignore_index=True)
+        salvar_parquet(agg, saida)
+        print(f"[retentar] features_pdfs atualizado: {len(agg)} contratos")
+
+    return {"sucesso": novos_sucesso, "sem_doc": novos_sem_doc,
+            "timeout_restante": novos_timeout}
