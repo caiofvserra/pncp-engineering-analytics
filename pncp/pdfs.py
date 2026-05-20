@@ -419,6 +419,16 @@ def executar(caminho_parquet=None, max_contratos=1000, ranking_path=None,
         "n_sem_doc": int(n_sem_doc),
     }, config.caminho(config.SUB_C2, "resumo.json"))
     print(f"[pdfs] {len(agg)} contratos com features → {saida}")
+
+    # Gera gráfico de marcadores por rótulo — agora que temos os PDFs
+    try:
+        from pncp.eda import g_marcadores_por_rotulo
+        p = g_marcadores_por_rotulo(config.PASTA_DADOS)
+        if p:
+            print(f"[pdfs] gráfico de marcadores → {p}")
+    except Exception as e:
+        print(f"[pdfs] gráfico marcadores falhou: {e}")
+
     liberar(df, feats)
     return saida
 

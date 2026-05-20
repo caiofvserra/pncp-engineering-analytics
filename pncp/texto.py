@@ -28,6 +28,29 @@ ser estar ter haver há foi era são é como mas ou também já não nao sim
 este esta esse essa aquele aquela isso aquilo isto
 """.split())
 
+# Stopwords específicas do domínio PNCP — termos que aparecem em
+# QUASE TODO contrato e não ajudam a discriminar engenharia × geral.
+# Adicionar aqui se vir nas Top palavras do EDA termos óbvios.
+STOPWORDS_DOMINIO = frozenset("""
+contratacao contratacoes contrato contratos servico servicos
+empresa empresas fornecedor fornecedores fornecimento
+prestacao prestar prestados prestada prestadas prestado
+processo processos objeto objetos
+pregao licitacao licitacoes edital editais
+visa visando referente referentes refere
+publica publico publicacao publicacoes administracao administrativa
+municipio municipal estadual federal
+art artigo lei n nº num numero numeros
+conforme atender atendimento atende
+itens item lote lotes
+ata atas registro registros preco precos preços
+tipo tipos descricao especificacao especificacoes
+unidade unidades quantidade quantidades qtd
+mes meses mensal anual ano anos dia dias periodo
+""".split())
+
+STOPWORDS_TODAS = STOPWORDS_PT | STOPWORDS_DOMINIO
+
 
 def _remover_acentos(texto: str) -> str:
     nfkd = unicodedata.normalize("NFKD", texto)
@@ -45,7 +68,7 @@ def limpar(texto) -> str:
     t = _remover_acentos(texto.lower())
     t = _RX_NAO_ALFANUM.sub(" ", t)
     t = _RX_MULTI_ESPACO.sub(" ", t).strip()
-    tokens = [w for w in t.split() if w not in STOPWORDS_PT and len(w) > 2]
+    tokens = [w for w in t.split() if w not in STOPWORDS_TODAS and len(w) > 2]
     return " ".join(tokens)
 
 

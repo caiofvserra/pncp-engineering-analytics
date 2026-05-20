@@ -176,6 +176,67 @@ def snapshot_auto(prefixo="run", incluir_pdfs_cache=False):
     return snapshot(nome, incluir_pdfs_cache=incluir_pdfs_cache)
 
 
+def snapshot_resultados(prefixo="resultados"):
+    """
+    Snapshot LEVE: copia apenas análises (eda, classificação, outliers,
+    avançado, triagem, grafos, cnae, llm, relatório) para uma pasta
+    timestampada. NÃO copia coleta (parquets de 1M+ regs) nem cache de PDFs
+    (gigabytes). Para preservar os RESULTADOS de cada Run all sem usar
+    espaço com dados brutos que não mudaram.
+
+    Use no fim de cada execução:
+        pncp.snapshot_resultados()
+        # → dados/snapshots/resultados_2026-05-12_143022/
+    """
+    import shutil
+    from datetime import datetime as _dt
+    from pncp import config
+
+    base = config.PASTA_DADOS
+    if not base.exists():
+        print(f"[snapshot] {base} não existe")
+        return None
+
+    nome = f"{prefixo}_{_dt.now().strftime('%Y-%m-%d_%H%M%S')}"
+    destino = base / "snapshots" / nome
+    destino.mkdir(parents=True, exist_ok=True)
+
+    # Subpastas a copiar (análises e resultados — não coleta/cache)
+    SUBPASTAS_RESULTADOS = (
+        "eda", "triagem", "classificacao", "outliers", "avancado",
+        "embeddings", "grafos", "cnae", "aditivos", "relatorio", "llm",
+    )
+    # PDFs: copia features e resumo, NÃO o cache de PDFs (gigantes)
+    n_copiados = 0
+    for sub in SUBPASTAS_RESULTADOS:
+        origem = base / sub
+        if not origem.exists():
+            continue
+        shutil.copytree(origem, destino / sub, dirs_exist_ok=True)
+        n_copiados += 1
+
+    # PDFs sem cache
+    pdfs_origem = base / "pdfs"
+    if pdfs_origem.exists():
+        sub_dst = destino / "pdfs"
+        sub_dst.mkdir(exist_ok=True)
+        for f in pdfs_origem.iterdir():
+            if f.is_file():
+                shutil.copy2(f, sub_dst / f.name)
+        n_copiados += 1
+
+    # Aditivos sem cache de PDFs
+    adit_origem = base / "aditivos"
+    if adit_origem.exists() and (destino / "aditivos").exists():
+        cache_adit = destino / "aditivos" / "cache_aditivos"
+        if cache_adit.exists():
+            shutil.rmtree(cache_adit)
+
+    print(f"[snapshot] resultados salvos em {destino} "
+          f"({n_copiados} subpasta(s) — sem coleta, sem cache PDF)")
+    return destino
+
+
 def snapshot(nome, incluir_pdfs_cache=False):
     """
     Guarda uma cópia do estado atual de `dados/` numa subpasta

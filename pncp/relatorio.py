@@ -630,4 +630,11 @@ def gerar():
         print(f"[relatorio] matriz_erro falhou: {e}")
     salvar_json(estatisticas(),
                  config.caminho(config.SUB_P9, "estatisticas.json"))
-    return gerar_markdown()
+    md = gerar_markdown()
+    # Snapshot automático dos resultados (NÃO inclui coleta nem cache PDF)
+    try:
+        from pncp import snapshot_resultados
+        snapshot_resultados()
+    except Exception as e:
+        print(f"[relatorio] snapshot automático falhou: {e}")
+    return md

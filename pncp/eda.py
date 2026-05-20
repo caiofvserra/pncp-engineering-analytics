@@ -21,7 +21,7 @@ from pncp import config
 from pncp._plot import salvar_e_mostrar
 from pncp.io_disco import ler_parquet, salvar_json
 from pncp.ram import liberar
-from pncp.texto import STOPWORDS_PT
+from pncp.texto import STOPWORDS_TODAS as STOPWORDS_PT
 
 
 def _agregar_rotulo(df):
@@ -269,19 +269,37 @@ def g_marcadores_por_rotulo(pasta):
     cols_pres = [c for c in df_u.columns if c.endswith("_presente")]
     if not cols_pres or df_u.empty:
         return None
+    # Nomes legíveis para o gráfico (sem ficar só "ART" "RRT" sem contexto)
+    rotulos_legiveis = {
+        "ART": "ART (Anotação Resp. Técnica)",
+        "RRT": "RRT (Registro Resp. Técnica)",
+        "CREA": "CREA",
+        "CAU": "CAU",
+        "ENGENHEIRO_RESPONSAVEL": "Engenheiro Responsável",
+        "ATESTADO_CAP_TECNICA": "Atestado Cap. Técnica",
+        "PROJETO_BASICO": "Projeto Básico/Executivo",
+        "OBRA_SERVICO_ENGENHARIA": "Obra / Serv. Engenharia",
+        "ABNT_NORMA": "Norma ABNT",
+        "LEI_14133_ENGENHARIA": "Lei 14.133 art. 6º XII/XX",
+    }
     res = (df_u.groupby("rotulo", observed=True)[cols_pres]
             .mean().mul(100).round(1))
-    res.columns = [c.replace("mk_", "").replace("_presente", "")
+    res.columns = [rotulos_legiveis.get(
+                       c.replace("mk_", "").replace("_presente", ""),
+                       c.replace("mk_", "").replace("_presente", ""))
                     for c in res.columns]
-    fig, ax = plt.subplots(figsize=(13, 5))
+    fig, ax = plt.subplots(figsize=(14, 6))
     res.T.plot.bar(ax=ax, edgecolor="white", width=0.85)
-    ax.set_title("% de contratos COM cada marcador legal, por rótulo\n"
-                 "Lei 6.496/1977: ART obrigatória em qualquer atividade "
-                 "de engenharia")
-    ax.set_xlabel("Categoria de marcador (ART, RRT, CREA, ...)")
-    ax.set_ylabel("% contratos com marcador (entre os com PDF analisado)")
-    ax.tick_params(axis="x", rotation=30)
-    ax.legend(title="rótulo original")
+    ax.set_title("% de contratos com cada marcador legal de engenharia, "
+                 "por rótulo original (Camada 2 — PDFs)\n"
+                 "Marcadores são sinais de RITO de engenharia "
+                 "(Lei 6.496/1977 + Lei 14.133/2021)")
+    ax.set_xlabel("Marcador detectado no PDF (TR, edital, projeto básico)")
+    ax.set_ylabel("% contratos COM o marcador (dos que têm PDF processado)")
+    ax.tick_params(axis="x", rotation=25, labelsize=8)
+    ax.legend(title="rótulo do órgão", loc="upper right")
+    # Linha auxiliar
+    ax.axhline(y=0, color="black", linewidth=0.5)
     return salvar_e_mostrar(fig, pasta / "12_marcadores_por_rotulo.png")
 
 
@@ -405,13 +423,8 @@ def executar(caminho_parquet=None, mostrar_inline=True):
         except Exception as e:
             print(f"[eda] {nome} falhou: {type(e).__name__}: {e}")
 
-    # Marcadores por rótulo (só roda se Camada 2 já gerou dados)
-    try:
-        p = g_marcadores_por_rotulo(pasta)
-        if p:
-            relatorio["graficos"]["marcadores_por_rotulo"] = str(p)
-    except Exception as e:
-        print(f"[eda] marcadores_por_rotulo falhou: {e}")
+    # OBS: g_marcadores_por_rotulo NÃO roda aqui — depende de PDFs.
+    # Ele é chamado automaticamente por pncp.pdfs.executar() no fim.
 
     # Estabilidade temporal (composição por ano)
     try:
