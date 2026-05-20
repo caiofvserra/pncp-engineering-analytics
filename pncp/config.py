@@ -84,8 +84,12 @@ TEST_SIZE = 0.2
 N_BOOTSTRAP = 1000
 
 # ── Camada 2 (PDFs) ──────────────────────────────────────────────────────────
-PDFS_TIMEOUT = 60
-PDFS_MAX_PAGINAS = 30          # corta documentos enormes
+# Timeouts curtos para evitar travar a célula em contratos lentos.
+# A API de integração às vezes demora 30s+ por contrato; com timeout 15s
+# pulamos rápido para o próximo se algo está lento.
+PDFS_TIMEOUT = 15
+PDFS_TIMEOUT_DOWNLOAD = 30
+PDFS_MAX_PAGINAS = 30
 PDFS_USAR_OCR = True
 
 # ── Subpastas de saída (criadas sob demanda) ─────────────────────────────────

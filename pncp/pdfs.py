@@ -45,23 +45,32 @@ def _decompor_ncp(num_controle):
 
 # ── API de integração — listagem e download ─────────────────────────────────
 def _listar_documentos(cnpj, ano, seq, tipo_recurso="compras"):
+    """API de integração; timeout curto + 1 retry para não pendurar a célula."""
     url = (f"{config.API_INTEGRACAO}/v1/orgaos/{cnpj}/{tipo_recurso}/"
            f"{ano}/{seq}/arquivos")
-    try:
-        r = requests.get(url, timeout=config.PDFS_TIMEOUT)
-        if r.status_code != 200:
+    for tentativa in range(2):
+        try:
+            r = requests.get(url, timeout=config.PDFS_TIMEOUT)
+            if r.status_code != 200:
+                return []
+            payload = r.json()
+            return (payload if isinstance(payload, list)
+                    else payload.get("data", []))
+        except requests.exceptions.Timeout:
+            if tentativa == 0:
+                continue
             return []
-        payload = r.json()
-        return payload if isinstance(payload, list) else payload.get("data", [])
-    except Exception:
-        return []
+        except Exception:
+            return []
+    return []
 
 
 def _baixar(cnpj, ano, seq, seq_doc, destino, tipo_recurso="compras"):
     url = (f"{config.API_INTEGRACAO}/v1/orgaos/{cnpj}/{tipo_recurso}/"
            f"{ano}/{seq}/arquivos/{seq_doc}")
     try:
-        r = requests.get(url, timeout=config.PDFS_TIMEOUT, stream=True)
+        r = requests.get(url, timeout=config.PDFS_TIMEOUT_DOWNLOAD,
+                          stream=True)
         if r.status_code != 200:
             return False
         destino.parent.mkdir(parents=True, exist_ok=True)
@@ -223,11 +232,20 @@ def executar(caminho_parquet=None, max_contratos=1000, ranking_path=None,
         print("[pdfs] nenhum contrato candidato — rode triagem antes")
         return None
 
-    print(f"[pdfs] processando {len(ncps)} contratos...")
+    print(f"[pdfs] processando {len(ncps)} contratos "
+          f"(timeout listagem={config.PDFS_TIMEOUT}s, download="
+          f"{config.PDFS_TIMEOUT_DOWNLOAD}s)...")
+    try:
+        from tqdm.auto import tqdm as _tqdm
+        _iter = _tqdm(enumerate(ncps, 1), total=len(ncps),
+                       desc="📥 PDFs", unit="contrato")
+    except ImportError:
+        _iter = enumerate(ncps, 1)
+
     registros = []
     n_sem_doc = n_baixados = n_cache_hit = 0
 
-    for i, ncp in enumerate(ncps, 1):
+    for i, ncp in _iter:
         info = _decompor_ncp(ncp)
         if not info or info["tipo"] not in (1, 2):
             continue
@@ -282,10 +300,11 @@ def executar(caminho_parquet=None, max_contratos=1000, ranking_path=None,
                 **marc,
             })
 
-        if i % 20 == 0:
-            print(f"[pdfs] {i}/{len(ncps)} | "
+        # Log granular a cada 50 (tqdm já dá feedback visual contínuo)
+        if i % 50 == 0:
+            print(f"\n[pdfs] {i}/{len(ncps)} | "
                   f"baixados={n_baixados}, cache={n_cache_hit}, "
-                  f"sem-doc={n_sem_doc}")
+                  f"sem-doc={n_sem_doc}, com-features={len(registros)}")
             monitorar_ram(f"PDFs {i}")
 
     if not registros:
