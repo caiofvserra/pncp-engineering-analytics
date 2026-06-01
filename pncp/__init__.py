@@ -77,7 +77,8 @@ def montar_drive(pasta="/content/drive/MyDrive/PNCP_TCC", force=True):
     return config.PASTA_DADOS
 
 
-def atualizar(branch="refactor", repo_dir="/content/pncp-engineering-analytics"):
+def atualizar(branch="claude/identify-engineering-underclassification-nImeQ",
+              repo_dir="/content/pncp-engineering-analytics"):
     """
     Faz git fetch + reset --hard na branch e recarrega o módulo `pncp`
     em memória. Use no INÍCIO de qualquer célula quando suspeitar que o
