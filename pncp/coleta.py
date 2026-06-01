@@ -284,6 +284,121 @@ def _atualizar_consolidado(uf):
         print(f"   ⚠ falha ao atualizar consolidado: {e}")
 
 
+def regenerar_consolidado(uf="SP"):
+    """
+    Força regeneração do contratos.parquet lendo TODOS os parciais/UF_*.
+    Use quando suspeitar que o consolidado está velho (ex: gráficos só
+    mostram anos antigos mesmo tendo baixado mais).
+    """
+    pasta = config.PASTA_DADOS / config.SUB_COLETA / "parciais"
+    if not pasta.exists():
+        print(f"[regenerar] pasta {pasta} não existe — sem parciais")
+        return None
+    arquivos = sorted(pasta.glob(f"{uf}_*.parquet"))
+    if not arquivos:
+        print(f"[regenerar] nenhum parcial de {uf} em {pasta}")
+        return None
+    print(f"[regenerar] lendo {len(arquivos)} parciais de {uf}...")
+    _atualizar_consolidado(uf)
+    return _path_consolidado()
+
+
+def diagnosticar(uf="SP"):
+    """
+    Inspeção COMPLETA do estado dos dados no Drive — útil quando gráficos
+    parecem não refletir o que foi coletado.
+
+    Mostra:
+      - Quais arquivos parciais existem, quantos contratos cada um tem
+      - Quantos contratos por ano em cada parcial
+      - O que está no consolidado atual e por que pode estar desatualizado
+      - Sugestão de ação
+    """
+    print(f"\n🔍 DIAGNÓSTICO de coleta {uf}\n")
+
+    # 1. Parciais por mês
+    pasta_parciais = config.PASTA_DADOS / config.SUB_COLETA / "parciais"
+    if pasta_parciais.exists():
+        arqs = sorted(pasta_parciais.glob(f"{uf}_*.parquet"))
+        print(f"📁 PARCIAIS/ — {len(arqs)} arquivo(s) por mês:")
+        total_parciais = 0
+        anos_presentes = {}
+        for a in arqs[:50]:  # mostra até 50 para não inundar
+            try:
+                df = pd.read_parquet(a, columns=["numeroControlePNCP",
+                                                  "dataPublicacaoPncp"])
+                n = len(df)
+                total_parciais += n
+                if "dataPublicacaoPncp" in df.columns:
+                    anos = (pd.to_datetime(df["dataPublicacaoPncp"],
+                                             errors="coerce")
+                            .dt.year.dropna().astype(int))
+                    for ano, cnt in anos.value_counts().items():
+                        anos_presentes[ano] = anos_presentes.get(ano, 0) + int(cnt)
+                print(f"   {a.name}: {n:,} regs")
+            except Exception as e:
+                print(f"   {a.name}: ERRO {e}")
+        if len(arqs) > 50:
+            print(f"   ... ({len(arqs) - 50} arquivos a mais não listados)")
+        print(f"\n   TOTAL nos parciais: {total_parciais:,} contratos")
+        if anos_presentes:
+            print(f"   Anos presentes: "
+                  + ", ".join(f"{a}={anos_presentes[a]:,}"
+                              for a in sorted(anos_presentes)))
+    else:
+        print("📁 PARCIAIS/ — pasta não existe (coleta antiga?)")
+
+    # 2. Consolidado atual
+    print(f"\n📦 CONSOLIDADO atual:")
+    for cand_nome, cand_path in [
+        (f"contratos_{uf}.parquet", _path_consolidado(uf)),
+        ("contratos.parquet", _path_consolidado()),
+    ]:
+        if cand_path.exists():
+            try:
+                df = pd.read_parquet(cand_path,
+                                       columns=["dataPublicacaoPncp", "rotulo"])
+                n = len(df)
+                anos = (pd.to_datetime(df["dataPublicacaoPncp"],
+                                         errors="coerce")
+                        .dt.year.value_counts().sort_index())
+                mtime = pd.Timestamp(cand_path.stat().st_mtime, unit="s")
+                print(f"   {cand_nome}: {n:,} contratos | "
+                      f"modificado: {mtime}")
+                print(f"     anos: {dict(anos)}")
+                if "rotulo" in df.columns:
+                    print(f"     rótulos: "
+                          f"{dict(df['rotulo'].value_counts())}")
+            except Exception as e:
+                print(f"   {cand_nome}: ERRO {e}")
+        else:
+            print(f"   {cand_nome}: NÃO EXISTE")
+
+    # 3. Checkpoint legado
+    legacy = _path_checkpoint(uf).with_suffix(".legacy.parquet")
+    if legacy.exists():
+        print(f"\n⚠ Checkpoint legado encontrado: {legacy.name}")
+        print(f"   (backup de antes da migração para parciais por mês)")
+
+    # 4. Progresso JSON
+    prog_path = _path_progresso(uf)
+    if prog_path.exists():
+        import json as _json
+        prog = _json.loads(prog_path.read_text(encoding="utf-8"))
+        completos = prog.get("meses_completos", [])
+        parciais = list(prog.get("meses_parciais", {}).keys())
+        print(f"\n📋 PROGRESSO JSON:")
+        print(f"   meses completos: {len(completos)}")
+        if completos:
+            print(f"     {completos[:6]}{'...' if len(completos) > 6 else ''}")
+        print(f"   meses parciais: {len(parciais)}")
+        if parciais:
+            print(f"     {parciais}")
+
+    print(f"\n💡 Se gráficos mostram anos antigos mas parciais têm anos novos:")
+    print(f"   pncp.coleta.regenerar_consolidado(uf='{uf}')")
+
+
 # ── Path do checkpoint e progresso ──────────────────────────────────────────
 # Por que chavear por UF e não por range:
 #   Se você roda coletar(uf='SP', anos=range(2024, 2026)) e depois
