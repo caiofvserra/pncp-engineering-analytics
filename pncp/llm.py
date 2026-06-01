@@ -285,3 +285,107 @@ def mostrar(top_n=10):
         if r.get("llm_recomendacao"):
             print(f"    📋 {r['llm_recomendacao']}")
         print()
+
+
+# ── Extração de entidades estruturadas via LLM ──────────────────────────────
+# Inspirado no notebook 14 (NER + LLM) e Tutoria 13_05 (extração)
+SYSTEM_NER = """Você extrai entidades estruturadas de objetos de contratos
+públicos brasileiros do PNCP. Identifique e retorne em JSON:
+
+{
+  "tipo_servico": "obra civil" | "manutenção" | "limpeza" | "vigilância" |
+                   "alimentação" | "transporte" | "fornecimento" |
+                   "serviço técnico de engenharia" | "outro",
+  "tem_engenheiro_responsavel": true | false,
+  "menciona_normas_tecnicas": true | false,
+  "menciona_projeto": true | false,
+  "local_servico": "string ou null",
+  "objetos_concretos": ["lista de coisas físicas mencionadas"],
+  "verbos_obra": ["construir", "reformar", etc. — se houver],
+  "valor_aproximado_mencionado": "string ou null",
+  "indicador_engenharia": "alto" | "medio" | "baixo" | "nenhum"
+}
+
+Responda APENAS no JSON, sem prefácio."""
+
+
+def extrair_entidades_llm(top_n=30, modelo="llama3.1", forcar=False):
+    """
+    Para os top suspeitos, extrai entidades estruturadas via LLM.
+    Notebook 14 + tutoria 13_05 — extração estruturada de informações.
+
+    Mais rico que NER do Spacy: identifica intenção semântica do contrato
+    além das menções nominais.
+    """
+    susp_path = config.caminho(config.SUB_P9,
+                                 "suspeitos_consolidados.parquet")
+    if not Path(susp_path).exists():
+        print("[llm.ner] rode pncp.relatorio.gerar() primeiro")
+        return None
+    saida = config.caminho("llm", "entidades_extraidas.parquet")
+    if not forcar and saida.exists():
+        print("[llm.ner] já rodou — use forcar=True")
+        return ler_parquet(saida)
+
+    df = ler_parquet(susp_path).head(top_n)
+    print(f"[llm.ner] extraindo entidades de {len(df)} suspeitos...")
+
+    resultados = []
+    for i, row in df.reset_index(drop=True).iterrows():
+        objeto = str(row.get("objeto", ""))[:600]
+        resp_txt = _chat_ollama(modelo, SYSTEM_NER,
+                                 f"Objeto:\n{objeto}\n\nExtraia.",
+                                 max_tokens=400)
+        resp = _parse_resposta(resp_txt) or {}
+        resultados.append({
+            "numeroControlePNCP": row.get("numeroControlePNCP"),
+            "objeto": objeto[:200],
+            "tipo_servico": resp.get("tipo_servico", "?"),
+            "tem_engenheiro_responsavel":
+                bool(resp.get("tem_engenheiro_responsavel", False)),
+            "menciona_normas_tecnicas":
+                bool(resp.get("menciona_normas_tecnicas", False)),
+            "menciona_projeto": bool(resp.get("menciona_projeto", False)),
+            "indicador_engenharia": resp.get("indicador_engenharia", "?"),
+            "verbos_obra": ", ".join(resp.get("verbos_obra", []) or []),
+            "objetos_concretos": ", ".join(
+                resp.get("objetos_concretos", []) or []),
+        })
+        if (i + 1) % 5 == 0:
+            print(f"[llm.ner] {i + 1}/{len(df)}")
+
+    out = pd.DataFrame(resultados)
+    salvar_parquet(out, saida)
+    print(f"[llm.ner] {len(out)} entidades extraídas → {saida}")
+    return out
+
+
+# ── Sumarização ─────────────────────────────────────────────────────────────
+SYSTEM_RESUMO = """Você resume em uma frase curta (≤25 palavras) o objeto
+de um contrato público brasileiro. Foque no QUE é contratado e ONDE.
+Não interprete legalidade. Responda apenas a frase, sem aspas, sem prefácio."""
+
+
+def resumir_objetos(amostra=20, modelo="llama3.1"):
+    """
+    Resume objetos longos em frases curtas via LLM.
+    Útil para relatório do TCC — apresentar suspeitos de forma escaneavel.
+    """
+    df = ler_parquet(config.caminho(config.SUB_P9,
+                                     "suspeitos_consolidados.parquet"))
+    df = df.head(amostra)
+    saida = []
+    for _, row in df.iterrows():
+        obj = str(row.get("objeto", ""))[:1000]
+        if len(obj) < 50:
+            saida.append(obj)
+            continue
+        resumo = _chat_ollama(modelo, SYSTEM_RESUMO, obj, max_tokens=80) or obj
+        saida.append(resumo.strip())
+    df = df.copy()
+    df["resumo_llm"] = saida
+    out_path = config.caminho("llm", "resumos.parquet")
+    salvar_parquet(df[["numeroControlePNCP", "objeto", "resumo_llm"]],
+                    out_path)
+    print(f"[llm.resumo] {len(df)} resumos → {out_path}")
+    return df

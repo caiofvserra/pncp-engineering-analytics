@@ -40,7 +40,7 @@ _LAZY = {
     "triagem", "outliers",
     "classificacao", "avancado",
     "embeddings", "grafos", "cnae", "pdfs", "aditivos", "relatorio",
-    "llm",
+    "llm", "temporal", "similaridade", "geografico",
     "spark_extras",
 }
 
