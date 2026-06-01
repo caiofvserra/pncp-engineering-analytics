@@ -271,12 +271,15 @@ def executar(fazer_lda=True, fazer_lp=True, fazer_apriori=True,
     if not precisa_de(config.caminho(config.SUB_P2, "X.npz"), "avancado",
                        "rode pncp.texto.construir_tfidf(...) primeiro"):
         return None
-    # Skip-if-exists: LDA + KMeans + GMM em 1M linhas é pesado
+    # Skip inteligente: pula se avancado é MAIS NOVO que TF-IDF.
+    from pncp.ram import cache_valido
     saida = config.caminho(config.SUB_P3)
-    if not forcar and (saida / "indice.json").exists():
-        print(f"[avancado] já rodou — pulando "
-              f"(use forcar=True para refazer)")
+    tfidf = config.caminho(config.SUB_P2, "X.npz")
+    if not forcar and cache_valido(saida / "indice.json", tfidf):
+        print(f"[avancado] já rodou e está atualizado — pulando")
         return None
+    if not forcar and (saida / "indice.json").exists():
+        print(f"[avancado] TF-IDF é mais novo — refazendo")
     monitorar_ram("início avancado")
     saidas = {}
     if fazer_lda:

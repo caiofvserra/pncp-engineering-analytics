@@ -318,13 +318,16 @@ def executar(caminho_parquet=None,
                        "rode pncp.texto.construir_tfidf(...) primeiro"):
         return None
 
-    # Skip-if-exists: se métricas e ranking já estão salvos, pula
+    # Skip inteligente: pula se métricas+ranking SÃO MAIS NOVOS que TF-IDF.
+    from pncp.ram import cache_valido
     metricas_path = saida / "metricas.json"
     ranking_path = saida / "ranking.parquet"
-    if not forcar and metricas_path.exists() and ranking_path.exists():
-        print(f"[clf] já rodou anteriormente — pulando "
-              f"(use forcar=True para re-treinar)")
+    if not forcar and cache_valido(metricas_path, tfidf_X) \
+       and cache_valido(ranking_path, tfidf_X):
+        print(f"[clf] já rodou e está atualizado — pulando")
         return saida
+    if not forcar and metricas_path.exists():
+        print(f"[clf] TF-IDF é mais novo que métricas — re-treinando")
 
     monitorar_ram("início clf")
     artefatos = carregar_tfidf()

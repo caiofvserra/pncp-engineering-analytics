@@ -110,12 +110,15 @@ def construir_tfidf(caminho_parquet, caminho_saida=None, forcar=False):
     if caminho_saida is None:
         caminho_saida = config.caminho(config.SUB_P2)
 
-    # Skip-if-exists: TF-IDF é caro (~5-10min em 1M linhas)
-    if not forcar and (caminho_saida / "X.npz").exists() and \
-       (caminho_saida / "vectorizer.joblib").exists():
-        print(f"[texto] TF-IDF já existe — pulando "
-              f"(use forcar=True para refazer)")
+    # Skip inteligente: pula se TF-IDF é MAIS NOVO que parquet de entrada.
+    # Se você atualizou contratos.parquet (nova coleta), refaz automático.
+    from pncp.ram import cache_valido
+    if not forcar and cache_valido(caminho_saida / "X.npz", caminho_parquet) \
+       and cache_valido(caminho_saida / "vectorizer.joblib", caminho_parquet):
+        print(f"[texto] TF-IDF já existe e está atualizado — pulando")
         return None
+    if not forcar and (caminho_saida / "X.npz").exists():
+        print(f"[texto] consolidado é mais novo que TF-IDF — refazendo")
 
     # Inclui anoPublicacao em labels p/ permitir holdout temporal
     cols_labels = ["objeto_limpo", "rotulo"]
