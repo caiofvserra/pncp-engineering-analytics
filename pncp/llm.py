@@ -389,3 +389,181 @@ def resumir_objetos(amostra=20, modelo="llama3.1"):
                     out_path)
     print(f"[llm.resumo] {len(df)} resumos → {out_path}")
     return df
+
+
+# ── Geração de indicadores por cluster ──────────────────────────────────────
+# Notebook 12 P2: LLM analisa cluster de docs e gera indicador estruturado
+SYSTEM_INDICADOR = """Você é analista de inteligência analítica especializado
+em contratações públicas brasileiras. Recebe uma amostra de objetos de
+contratos que foram agrupados por similaridade semântica (cluster).
+
+Sua tarefa: identificar UM indicador-chave que sintetize o padrão de
+subenquadramento (ou ausência dele) presente no cluster.
+
+Responda APENAS no JSON:
+{
+  "nome": "Nome curto descritivo (até 12 palavras)",
+  "categoria": "infraestrutura" | "manutenção" | "obra civil" | "serviço técnico" |
+                "fornecimento" | "vigilância/limpeza" | "transporte" | "outro",
+  "descricao": "1-2 frases explicando o padrão observado",
+  "indicio_subenquadramento": "alto" | "medio" | "baixo" | "nenhum",
+  "justificativa_juridica": "referência à Lei 14.133 art. específico, se aplicável",
+  "recomendacao_acao": "uma ação concreta para auditoria/controle",
+  "exemplos_objetos": ["3 trechos curtos dos objetos do cluster"]
+}"""
+
+
+def gerar_indicadores(top_n_clusters=10, n_por_cluster=5,
+                       modelo="llama3.1", forcar=False):
+    """
+    Para cada um dos top-N clusters de contratos similares, gera um
+    indicador-síntese via LLM. Notebook 12 P2.
+
+    Pré-requisito: rodar pncp.grafos_semanticos.construir() antes.
+    """
+    from pncp import grafos_semanticos
+    saida = config.caminho("llm", "indicadores.json")
+    if not forcar and saida.exists():
+        print("[llm.indicadores] já gerado — use forcar=True")
+        return _ler_json_safe(saida)
+
+    amostras = grafos_semanticos.amostrar_por_cluster(
+        n_por_cluster=n_por_cluster, min_tamanho=10)
+    if amostras is None or amostras.empty:
+        print("[llm.indicadores] sem clusters — rode "
+              "pncp.grafos_semanticos.construir() primeiro")
+        return None
+
+    # Pega top-N clusters por tamanho
+    cluster_ids = (amostras.groupby("cluster")["_tamanho_cluster"]
+                   .first().sort_values(ascending=False)
+                   .head(top_n_clusters).index)
+
+    indicadores = []
+    for cid in cluster_ids:
+        sub = amostras[amostras["cluster"] == cid]
+        tam = int(sub["_tamanho_cluster"].iloc[0])
+        objetos = "\n".join(f"- {str(o)[:300]}"
+                              for o in sub["objeto"].tolist())
+        prompt = (f"Cluster #{cid} ({tam} contratos similares).\n\n"
+                  f"Amostra de objetos:\n{objetos}\n\n"
+                  f"Gere o indicador no JSON.")
+        resp = _chat_ollama(modelo, SYSTEM_INDICADOR, prompt, max_tokens=600)
+        parsed = _parse_resposta(resp) or {}
+        parsed["cluster_id"] = int(cid)
+        parsed["tamanho_cluster"] = tam
+        indicadores.append(parsed)
+        print(f"[llm.indicadores] cluster {cid}: "
+              f"{parsed.get('nome', '?')[:60]}")
+
+    salvar_json({"indicadores": indicadores, "modelo": modelo}, saida)
+    print(f"[llm.indicadores] {len(indicadores)} indicadores → {saida}")
+    return indicadores
+
+
+def _ler_json_safe(path):
+    import json
+    return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+# ── Agente simples LLM + ferramentas ────────────────────────────────────────
+# Notebook 18: agente com Tools. Versão enxuta sem LangChain (que é pesado
+# e tem mudanças quebradiças). Loop: prompt → LLM escolhe tool → executa →
+# retorna resposta.
+SYSTEM_AGENTE = """Você é um agente analítico para auditoria de contratos
+públicos. Tem acesso a estas ferramentas (uma por chamada):
+
+- buscar_similares(texto): retorna contratos parecidos a um texto livre
+- listar_suspeitos(n): retorna os top-N suspeitos consolidados
+- contar_por_rotulo(): distribuição de rótulos na base
+- buscar_municipio(nome): contratos suspeitos em um município
+
+Quando precisar de dados, responda em JSON:
+{"acao": "<nome_ferramenta>", "argumentos": {...}}
+
+Quando tiver dados suficientes para responder ao usuário, responda em JSON:
+{"acao": "responder", "resposta": "<texto natural>"}"""
+
+
+def _tool_buscar_similares(texto, k=5):
+    from pncp import similaridade
+    df = similaridade.buscar_por_texto(texto, k=k)
+    if df is None or df.empty:
+        return "(nenhum contrato similar encontrado)"
+    linhas = [f"- {r['numeroControlePNCP']} | {str(r['objeto'])[:100]} "
+              f"(sim={r['similaridade']:.2f})"
+              for _, r in df.iterrows()]
+    return "\n".join(linhas)
+
+
+def _tool_listar_suspeitos(n=10):
+    p = config.caminho(config.SUB_P9, "suspeitos_consolidados.parquet")
+    if not Path(p).exists():
+        return "(sem suspeitos — rode pncp.relatorio.gerar())"
+    df = ler_parquet(p).head(n)
+    return "\n".join(f"- {r['numeroControlePNCP']} | "
+                     f"sinais={r.get('n_sinais', 0)} | "
+                     f"{str(r.get('objeto', ''))[:80]}"
+                     for _, r in df.iterrows())
+
+
+def _tool_contar_por_rotulo():
+    df = ler_parquet(config.caminho(config.SUB_COLETA, "contratos.parquet"),
+                     colunas=["rotulo"])
+    return df["rotulo"].value_counts().to_string()
+
+
+def _tool_buscar_municipio(nome):
+    p = config.caminho(config.SUB_P9, "suspeitos_consolidados.parquet")
+    if not Path(p).exists():
+        return "(sem suspeitos)"
+    df = ler_parquet(p)
+    if "municipioNome" not in df.columns:
+        return "(municipio não disponível)"
+    sub = df[df["municipioNome"].astype(str).str.contains(nome,
+                                                              case=False,
+                                                              na=False)]
+    if sub.empty:
+        return f"(nenhum suspeito em {nome})"
+    return f"{len(sub)} suspeito(s) em municípios que casam '{nome}':\n" + \
+           "\n".join(f"- {str(r.get('objeto', ''))[:80]}"
+                     for _, r in sub.head(10).iterrows())
+
+
+_TOOLS = {
+    "buscar_similares": lambda **kw: _tool_buscar_similares(**kw),
+    "listar_suspeitos": lambda **kw: _tool_listar_suspeitos(**kw),
+    "contar_por_rotulo": lambda **kw: _tool_contar_por_rotulo(**kw),
+    "buscar_municipio": lambda **kw: _tool_buscar_municipio(**kw),
+}
+
+
+def agente(pergunta, modelo="llama3.1", max_passos=4):
+    """
+    Agente LLM + ferramentas. Notebook 18.
+
+    Loop: o LLM lê a pergunta, decide qual ferramenta chamar, recebe a
+    saída e decide se continua ou responde.
+
+    Exemplo:
+        pncp.llm.agente("Quais os principais padrões de subenquadramento?")
+        pncp.llm.agente("Tem contratos parecidos com obras em São Paulo?")
+    """
+    contexto = f"Pergunta do usuário: {pergunta}"
+    for passo in range(max_passos):
+        resp = _chat_ollama(modelo, SYSTEM_AGENTE, contexto, max_tokens=500)
+        parsed = _parse_resposta(resp) or {}
+        acao = parsed.get("acao")
+        if acao == "responder":
+            return parsed.get("resposta", "(sem resposta)")
+        if acao in _TOOLS:
+            args = parsed.get("argumentos", {})
+            try:
+                saida = _TOOLS[acao](**args)
+            except Exception as e:
+                saida = f"(erro na ferramenta: {e})"
+            contexto += f"\n\nResultado da ferramenta {acao}:\n{saida}"
+            print(f"[agente] passo {passo + 1}: usou {acao}")
+        else:
+            return parsed.get("resposta", str(parsed))
+    return "(agente atingiu limite de passos sem responder)"
