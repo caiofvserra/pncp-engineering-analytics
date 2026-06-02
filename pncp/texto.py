@@ -28,6 +28,29 @@ ser estar ter haver há foi era são é como mas ou também já não nao sim
 este esta esse essa aquele aquela isso aquilo isto
 """.split())
 
+# Stopwords específicas do domínio PNCP — termos que aparecem em
+# QUASE TODO contrato e não ajudam a discriminar engenharia × geral.
+# Adicionar aqui se vir nas Top palavras do EDA termos óbvios.
+STOPWORDS_DOMINIO = frozenset("""
+contratacao contratacoes contrato contratos servico servicos
+empresa empresas fornecedor fornecedores fornecimento
+prestacao prestar prestados prestada prestadas prestado
+processo processos objeto objetos
+pregao licitacao licitacoes edital editais
+visa visando referente referentes refere
+publica publico publicacao publicacoes administracao administrativa
+municipio municipal estadual federal
+art artigo lei n nº num numero numeros
+conforme atender atendimento atende
+itens item lote lotes
+ata atas registro registros preco precos preços
+tipo tipos descricao especificacao especificacoes
+unidade unidades quantidade quantidades qtd
+mes meses mensal anual ano anos dia dias periodo
+""".split())
+
+STOPWORDS_TODAS = STOPWORDS_PT | STOPWORDS_DOMINIO
+
 
 def _remover_acentos(texto: str) -> str:
     nfkd = unicodedata.normalize("NFKD", texto)
@@ -45,16 +68,24 @@ def limpar(texto) -> str:
     t = _remover_acentos(texto.lower())
     t = _RX_NAO_ALFANUM.sub(" ", t)
     t = _RX_MULTI_ESPACO.sub(" ", t).strip()
-    tokens = [w for w in t.split() if w not in STOPWORDS_PT and len(w) > 2]
+    tokens = [w for w in t.split() if w not in STOPWORDS_TODAS and len(w) > 2]
     return " ".join(tokens)
 
 
 def preprocessar(caminho_parquet):
     """
     Adiciona coluna `objeto_limpo` ao parquet e regrava.
+    Idempotente — rodar várias vezes não duplica trabalho.
     Retorna o mesmo path (para encadear).
     """
+    from pncp.ram import precisa_de
+    if not precisa_de(caminho_parquet, "texto.preprocessar",
+                       "rode pncp.coleta.coletar(...) primeiro"):
+        return caminho_parquet
     df = ler_parquet(caminho_parquet)
+    if df.empty:
+        print("[texto] parquet vazio — pulando")
+        return caminho_parquet
     if "objeto_limpo" not in df.columns:
         df["objeto_limpo"] = df["objeto"].fillna("").map(limpar)
         salvar_parquet(df, caminho_parquet)
@@ -62,17 +93,46 @@ def preprocessar(caminho_parquet):
     return caminho_parquet
 
 
-def construir_tfidf(caminho_parquet, caminho_saida=None):
+def construir_tfidf(caminho_parquet, caminho_saida=None, forcar=False):
     """
     Constrói TF-IDF (1,2-grams) sobre `objeto_limpo` e salva sparse + vectorizer.
+
+    Args:
+      forcar: se True, refaz mesmo se X.npz já existe. Default False (skip).
 
     Returns:
         dict com paths: {"X": ..., "vec": ..., "labels": ...}
     """
+    from pncp.ram import precisa_de
+    if not precisa_de(caminho_parquet, "texto.tfidf",
+                       "rode preprocessar() primeiro"):
+        return None
     if caminho_saida is None:
         caminho_saida = config.caminho(config.SUB_P2)
 
-    df = ler_parquet(caminho_parquet, colunas=["objeto_limpo", "rotulo"])
+    # Skip inteligente: pula se TF-IDF é MAIS NOVO que parquet de entrada.
+    # Se você atualizou contratos.parquet (nova coleta), refaz automático.
+    from pncp.ram import cache_valido
+    if not forcar and cache_valido(caminho_saida / "X.npz", caminho_parquet) \
+       and cache_valido(caminho_saida / "vectorizer.joblib", caminho_parquet):
+        print(f"[texto] TF-IDF já existe e está atualizado — pulando")
+        return None
+    if not forcar and (caminho_saida / "X.npz").exists():
+        print(f"[texto] consolidado é mais novo que TF-IDF — refazendo")
+
+    # Inclui anoPublicacao em labels p/ permitir holdout temporal
+    cols_labels = ["objeto_limpo", "rotulo"]
+    df_check = ler_parquet(caminho_parquet, colunas=["rotulo"])
+    if not df_check.empty:
+        try:
+            ler_parquet(caminho_parquet, colunas=["anoPublicacao"])
+            cols_labels.append("anoPublicacao")
+        except Exception:
+            pass
+    df = ler_parquet(caminho_parquet, colunas=cols_labels)
+    if df.empty:
+        print("[texto] parquet vazio — pulando TF-IDF")
+        return None
     vec = TfidfVectorizer(
         max_features=config.TFIDF_MAX_FEATURES,
         min_df=config.TFIDF_MIN_DF,
@@ -86,7 +146,9 @@ def construir_tfidf(caminho_parquet, caminho_saida=None):
     paths = {
         "X": salvar_sparse(X, caminho_saida / "X.npz"),
         "vec": salvar_modelo(vec, caminho_saida / "vectorizer.joblib"),
-        "labels": salvar_parquet(df[["rotulo"]], caminho_saida / "labels.parquet"),
+        "labels": salvar_parquet(
+            df[[c for c in ("rotulo", "anoPublicacao") if c in df.columns]],
+            caminho_saida / "labels.parquet"),
     }
     liberar(df, X, vec)
     return paths

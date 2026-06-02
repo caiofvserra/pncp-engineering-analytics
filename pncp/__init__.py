@@ -1,9 +1,8 @@
 """
 Pacote PNCP — análise de subenquadramento de contratos de engenharia.
 
-TCC MBA IA & Big Data (ICMC/USP). Identifica contratos rotulados como
-"serviços gerais" (categoriaProcessoId=8) que deveriam ser "engenharia/obras"
-(7 ou 9), violando a Lei 14.133/2021.
+Identifica contratos rotulados como "serviços gerais" (categoriaProcessoId=8)
+que deveriam ser "engenharia/obras" (7 ou 9), violando a Lei 14.133/2021.
 
 Cada subpacote escreve seus artefatos em disco (parquet/json/npz) para que
 o pipeline sobreviva a reinício de kernel no Colab.
@@ -30,8 +29,30 @@ PyMuPDF quando você de fato chama `pncp.embeddings.executar()`.
 """
 
 import importlib
+import warnings
+from pathlib import Path
 
 __version__ = "1.0.0"
+
+
+# ── Supressão de ruído no log ───────────────────────────────────────────────
+# Esses warnings poluem o log sem informação acionável:
+#  - DeprecationWarning de jupyter_client (utcnow): vai ser resolvido pelo
+#    próprio jupyter, não temos como mexer
+#  - FutureWarning do pandas sobre downcasting silencioso: usamos o opt-in
+#    explícito (set_option abaixo) e não precisamos do aviso por linha
+#  - ConvergenceWarning quando ele ocorre em ramos não-default
+warnings.filterwarnings("ignore", category=DeprecationWarning,
+                          module=r"jupyter_client.*")
+warnings.filterwarnings("ignore", category=DeprecationWarning,
+                          message=r".*utcnow.*")
+warnings.filterwarnings("ignore", category=FutureWarning,
+                          message=r".*Downcasting.*")
+try:
+    import pandas as _pd
+    _pd.set_option("future.no_silent_downcasting", True)
+except Exception:
+    pass
 
 _LAZY = {
     "config", "io_disco", "ram",
@@ -39,6 +60,7 @@ _LAZY = {
     "triagem", "outliers",
     "classificacao", "avancado",
     "embeddings", "grafos", "cnae", "pdfs", "aditivos", "relatorio",
+    "llm", "temporal", "similaridade", "geografico", "grafos_semanticos",
     "spark_extras",
 }
 
@@ -57,10 +79,16 @@ def __dir__():
 
 
 # ── Helpers Colab ────────────────────────────────────────────────────────────
-def montar_drive(pasta="/content/drive/MyDrive/PNCP_TCC"):
-    """Monta o Google Drive e configura PASTA_DADOS para `pasta/dados`."""
+def montar_drive(pasta="/content/drive/MyDrive/PNCP_TCC", force=True):
+    """
+    Monta o Google Drive e configura PASTA_DADOS para `pasta/dados`.
+
+    `force=True` (padrão) refaz a montagem mesmo se o Colab achar que já
+    está montado — resolve estados quebrados de sessões anteriores.
+    Não apaga nem reescreve nenhum arquivo do Drive: só refaz a conexão.
+    """
     from google.colab import drive
-    drive.mount("/content/drive", force_remount=False)
+    drive.mount("/content/drive", force_remount=force)
     from pncp import config
     from pathlib import Path
     config.PASTA_DADOS = Path(pasta) / "dados"
@@ -69,17 +97,215 @@ def montar_drive(pasta="/content/drive/MyDrive/PNCP_TCC"):
     return config.PASTA_DADOS
 
 
+def atualizar(branch="claude/identify-engineering-underclassification-nImeQ",
+              repo_dir="/content/pncp-engineering-analytics"):
+    """
+    Faz git fetch + reset --hard na branch e recarrega o módulo `pncp`
+    em memória. Use no INÍCIO de qualquer célula quando suspeitar que o
+    código pode ter mudado no GitHub.
+
+    Após chamar isso, é preciso fazer `import pncp` de novo na célula
+    para usar a versão recarregada.
+    """
+    import subprocess, sys
+    if not Path(repo_dir).exists():
+        print(f"[atualizar] {repo_dir} não existe — clone primeiro")
+        return
+    subprocess.run(["git", "-C", repo_dir, "fetch", "origin"], check=True)
+    subprocess.run(["git", "-C", repo_dir, "checkout", branch], check=False)
+    subprocess.run(["git", "-C", repo_dir, "reset", "--hard",
+                    f"origin/{branch}"], check=True)
+    out = subprocess.run(["git", "-C", repo_dir, "log", "-1", "--oneline"],
+                         capture_output=True, text=True).stdout.strip()
+    # Limpa o módulo da memória
+    for mod in [m for m in list(sys.modules) if m.startswith("pncp")]:
+        del sys.modules[mod]
+    print(f"[atualizar] commit ativo: {out}")
+    print(f"[atualizar] rode `import pncp` de novo na célula")
+
+
 def keep_alive():
-    """Injeta JS no Colab para evitar desconexão por inatividade (~12h)."""
+    """
+    Injeta JavaScript no Colab para evitar desconexão por inatividade.
+
+    Estratégia em três camadas — necessária quando o usuário trabalha em
+    outra janela (PowerAutomate, outro navegador) e a aba do Colab fica
+    em segundo plano:
+
+      1. Clica `colab-connect-button` a cada 60s (heartbeat oficial)
+      2. Dispara `mousemove` a cada 30s (sinaliza atividade humana)
+      3. Toca um oscilador Web Audio inaudível continuamente — isto
+         IMPEDE o navegador de aplicar throttling à aba em background
+         (Chrome/Firefox não suspendem timers de abas que tocam áudio).
+
+    A camada 3 é o que faz a diferença quando você não está olhando
+    para o Colab. Limites:
+      - Não escapa do timeout duro de 12h (free)
+      - Se o navegador inteiro for fechado, perde tudo
+
+    Quando isso falhar, a retomada automática de pncp.coleta.coletar()
+    permite continuar do ponto exato onde parou.
+    """
     try:
         from IPython.display import display, Javascript
         display(Javascript("""
-            function keepAlive() {
-              const btn = document.querySelector("colab-connect-button");
-              if (btn) btn.click();
-            }
-            setInterval(keepAlive, 60000);
+            (function(){
+              // Camada 1: heartbeat oficial do Colab
+              setInterval(function(){
+                const b = document.querySelector("colab-connect-button");
+                if (b && typeof b.click === "function") b.click();
+              }, 60000);
+
+              // Camada 2: simula atividade do usuário
+              setInterval(function(){
+                document.dispatchEvent(new MouseEvent("mousemove",
+                  {bubbles:true, clientX: Math.random()*5, clientY: Math.random()*5}));
+              }, 30000);
+
+              // Camada 3: áudio inaudível — impede o navegador de
+              // suspender a aba quando ela está em background
+              try {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const gain = ctx.createGain();
+                gain.gain.value = 0.0001;            // praticamente mudo
+                osc.frequency.value = 440;
+                osc.connect(gain).connect(ctx.destination);
+                osc.start();
+                window._pncpKeepAliveAudio = {ctx, osc, gain};
+                console.log("[pncp] keep-alive 3 camadas ativado");
+              } catch(e) {
+                console.log("[pncp] WebAudio não disponível: " + e.message);
+              }
+            })();
         """))
-        print("[colab] keep-alive ativado")
-    except Exception:
-        pass
+        print("[colab] keep-alive ativado (heartbeat 60s + atividade 30s "
+              "+ WebAudio anti-throttle)")
+        print("        ⚠ mantenha a aba do Colab aberta (mesmo em outra janela)")
+    except Exception as e:
+        print(f"[colab] keep-alive não pôde ser ativado: {e}")
+
+
+def snapshot_auto(prefixo="run", incluir_pdfs_cache=False):
+    """Snapshot com nome automático = prefixo_YYYY-MM-DD_HHMMSS.
+
+    Use no fim de cada Run all completo para preservar o estado antes de
+    rodar de novo com dados maiores (ex: depois de adicionar 2025-2026).
+    """
+    from datetime import datetime as _dt
+    nome = f"{prefixo}_{_dt.now().strftime('%Y-%m-%d_%H%M%S')}"
+    return snapshot(nome, incluir_pdfs_cache=incluir_pdfs_cache)
+
+
+def snapshot_resultados(prefixo="resultados"):
+    """
+    Snapshot LEVE: copia apenas análises (eda, classificação, outliers,
+    avançado, triagem, grafos, cnae, llm, relatório) para uma pasta
+    timestampada. NÃO copia coleta (parquets de 1M+ regs) nem cache de PDFs
+    (gigabytes). Para preservar os RESULTADOS de cada Run all sem usar
+    espaço com dados brutos que não mudaram.
+
+    Use no fim de cada execução:
+        pncp.snapshot_resultados()
+        # → dados/snapshots/resultados_2026-05-12_143022/
+    """
+    import shutil
+    from datetime import datetime as _dt
+    from pncp import config
+
+    base = config.PASTA_DADOS
+    if not base.exists():
+        print(f"[snapshot] {base} não existe")
+        return None
+
+    nome = f"{prefixo}_{_dt.now().strftime('%Y-%m-%d_%H%M%S')}"
+    destino = base / "snapshots" / nome
+    destino.mkdir(parents=True, exist_ok=True)
+
+    # Subpastas a copiar (análises e resultados — não coleta/cache)
+    SUBPASTAS_RESULTADOS = (
+        "eda", "triagem", "classificacao", "outliers", "avancado",
+        "embeddings", "grafos", "cnae", "aditivos", "relatorio", "llm",
+    )
+    # PDFs: copia features e resumo, NÃO o cache de PDFs (gigantes)
+    n_copiados = 0
+    for sub in SUBPASTAS_RESULTADOS:
+        origem = base / sub
+        if not origem.exists():
+            continue
+        shutil.copytree(origem, destino / sub, dirs_exist_ok=True)
+        n_copiados += 1
+
+    # PDFs sem cache
+    pdfs_origem = base / "pdfs"
+    if pdfs_origem.exists():
+        sub_dst = destino / "pdfs"
+        sub_dst.mkdir(exist_ok=True)
+        for f in pdfs_origem.iterdir():
+            if f.is_file():
+                shutil.copy2(f, sub_dst / f.name)
+        n_copiados += 1
+
+    # Aditivos sem cache de PDFs
+    adit_origem = base / "aditivos"
+    if adit_origem.exists() and (destino / "aditivos").exists():
+        cache_adit = destino / "aditivos" / "cache_aditivos"
+        if cache_adit.exists():
+            shutil.rmtree(cache_adit)
+
+    print(f"[snapshot] resultados salvos em {destino} "
+          f"({n_copiados} subpasta(s) — sem coleta, sem cache PDF)")
+    return destino
+
+
+def snapshot(nome, incluir_pdfs_cache=False):
+    """
+    Guarda uma cópia do estado atual de `dados/` numa subpasta
+    `dados/snapshots/<nome>/`. Útil antes de juntar mais dados (ex: você
+    coletou 2024 inteiro, vai analisar, e depois quer baixar 2025-2026
+    sem perder o estado "só 2024" para comparação no TCC).
+
+    Por padrão NÃO inclui o cache de PDFs (pesado). Para incluir tudo:
+    `pncp.snapshot('nome', incluir_pdfs_cache=True)`.
+
+    Para restaurar manualmente, copie de volta os arquivos da subpasta.
+    """
+    import shutil
+    from pncp import config
+
+    base = config.PASTA_DADOS
+    if not base.exists():
+        print(f"[snapshot] {base} ainda não existe — nada a salvar")
+        return None
+
+    destino = base / "snapshots" / nome
+    if destino.exists():
+        print(f"[snapshot] '{nome}' já existe em {destino}")
+        print(f"           use outro nome ou apague o anterior manualmente")
+        return None
+
+    destino.mkdir(parents=True)
+    n_arq = 0
+    for item in base.iterdir():
+        if item.name == "snapshots":
+            continue
+        if not incluir_pdfs_cache and item.name == config.SUB_C2:
+            # Copia features_pdfs.parquet e resumo.json mas pula o cache
+            sub_dst = destino / item.name
+            sub_dst.mkdir()
+            for f in item.iterdir():
+                if f.name == "cache_pdfs":
+                    continue
+                if f.is_file():
+                    shutil.copy2(f, sub_dst / f.name)
+                    n_arq += 1
+            continue
+        if item.is_dir():
+            shutil.copytree(item, destino / item.name)
+            n_arq += sum(1 for _ in (destino / item.name).rglob("*"))
+        else:
+            shutil.copy2(item, destino / item.name)
+            n_arq += 1
+
+    print(f"[snapshot] '{nome}' salvo em {destino} ({n_arq} arquivos)")
+    return destino

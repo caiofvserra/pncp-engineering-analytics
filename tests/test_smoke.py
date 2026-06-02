@@ -62,6 +62,22 @@ def test_io_disco_round_trip(tmp_path):
     assert len(out) == 3
 
 
+def test_llm_backend_dispatch():
+    """O resolvedor de modelo respeita o backend ativo (ollama/gemini)."""
+    from pncp import llm
+    bkp = llm.BACKEND
+    try:
+        llm.BACKEND = "ollama"
+        assert llm._modelo_efetivo("llama3.1") == "llama3.1"
+        assert llm._modelo_efetivo("gemini-1.5-pro") == llm.MODELO_OLLAMA
+        llm.BACKEND = "gemini"
+        assert llm._modelo_efetivo("llama3.1") == llm.MODELO_GEMINI
+        assert llm._modelo_efetivo(None) == llm.MODELO_GEMINI
+        assert llm._modelo_efetivo("gemini-1.5-pro") == "gemini-1.5-pro"
+    finally:
+        llm.BACKEND = bkp
+
+
 def test_relatorio_glossario(capsys):
     from pncp.relatorio import glossario, GLOSSARIO
     assert "F1" in GLOSSARIO

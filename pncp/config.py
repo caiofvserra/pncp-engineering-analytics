@@ -42,14 +42,21 @@ def rotular(cat_id):
 
 
 # ── API PNCP ─────────────────────────────────────────────────────────────────
+# Há DUAS APIs:
+#   1. consulta (https://pncp.gov.br/api/consulta) — lista contratos/contratações
+#   2. integração (https://pncp.gov.br/api/pncp) — documentos (PDFs), aditivos
 API_BASE = "https://pncp.gov.br/api/consulta"
+API_INTEGRACAO = "https://pncp.gov.br/api/pncp"
 PAUSA_PAGINA = 0.3      # rate limit cordial
 TIMEOUT_HTTP = 30
 TENTATIVAS_HTTP = 4
 
 # ── TF-IDF / texto ───────────────────────────────────────────────────────────
-TFIDF_MAX_FEATURES = 50_000   # cap para não estourar RAM em 300k linhas
-TFIDF_MIN_DF = 5
+# Defaults pensados para 1M+ contratos em Colab Free (12GB RAM):
+#   max_features=30k cobre os termos importantes sem inflar matriz
+#   min_df=10 elimina ruído raro (palavras em <10 docs)
+TFIDF_MAX_FEATURES = 30_000
+TFIDF_MIN_DF = 10
 TFIDF_NGRAM = (1, 2)
 
 # Termos usados para sinalizar engenharia no texto livre
@@ -77,8 +84,12 @@ TEST_SIZE = 0.2
 N_BOOTSTRAP = 1000
 
 # ── Camada 2 (PDFs) ──────────────────────────────────────────────────────────
-PDFS_TIMEOUT = 60
-PDFS_MAX_PAGINAS = 30          # corta documentos enormes
+# Timeouts curtos para evitar travar a célula em contratos lentos.
+# A API de integração às vezes demora 30s+ por contrato; com timeout 15s
+# pulamos rápido para o próximo se algo está lento.
+PDFS_TIMEOUT = 15
+PDFS_TIMEOUT_DOWNLOAD = 30
+PDFS_MAX_PAGINAS = 30
 PDFS_USAR_OCR = True
 
 # ── Subpastas de saída (criadas sob demanda) ─────────────────────────────────

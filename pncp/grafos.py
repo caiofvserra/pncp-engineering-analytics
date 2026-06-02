@@ -16,11 +16,10 @@ from collections import Counter
 import networkx as nx
 import numpy as np
 import pandas as pd
-import matplotlib
-matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from pncp import config
+from pncp._plot import salvar_e_mostrar
 from pncp.io_disco import ler_parquet, salvar_parquet, salvar_json
 from pncp.ram import liberar, com_gc
 
@@ -124,22 +123,39 @@ def visualizar(G, top_n=50, nome="grafo.png"):
     pos = nx.spring_layout(H, seed=config.SEED, k=0.4)
     cores = ["tab:blue" if G.nodes[n].get("tipo") == "orgao" else "tab:orange"
               for n in H.nodes]
-    nx.draw_networkx_nodes(H, pos, node_color=cores, node_size=80, ax=ax)
-    nx.draw_networkx_edges(H, pos, alpha=0.3, ax=ax)
-    ax.set_title(f"Top-{top_n} nós (azul=órgão, laranja=fornecedor)")
+    # Tamanho proporcional ao grau (nós mais centrais maiores)
+    graus_h = dict(H.degree())
+    tams = [200 + 30 * graus_h.get(n, 0) for n in H.nodes]
+    nx.draw_networkx_nodes(H, pos, node_color=cores, node_size=tams,
+                            alpha=0.85, ax=ax)
+    nx.draw_networkx_edges(H, pos, alpha=0.25, width=0.8, ax=ax)
+
+    # Labels apenas dos top-15 nós (legível); resto fica anônimo
+    top_para_label = dict(sorted(graus_h.items(),
+                                    key=lambda x: x[1], reverse=True)[:15])
+    labels = {n: (str(n)[:30] + ("…" if len(str(n)) > 30 else ""))
+              for n in top_para_label}
+    nx.draw_networkx_labels(H, pos, labels=labels, font_size=7, ax=ax,
+                              bbox=dict(facecolor="white", edgecolor="none",
+                                          alpha=0.7, pad=1))
+    ax.set_title(f"Top-{top_n} nós por grau "
+                 f"(azul=órgão, laranja=fornecedor; labels nos top-15)")
     ax.axis("off")
-    saida = config.caminho(config.SUB_P7, nome)
-    fig.tight_layout()
-    fig.savefig(saida, dpi=120, bbox_inches="tight")
-    plt.close(fig)
-    return saida
+    return salvar_e_mostrar(fig, config.caminho(config.SUB_P7, nome))
 
 
 @com_gc
 def executar(caminho_parquet=None):
+    from pncp.ram import precisa_de
     if caminho_parquet is None:
         caminho_parquet = config.caminho(config.SUB_COLETA, "contratos.parquet")
+    if not precisa_de(caminho_parquet, "grafos",
+                       "rode pncp.coleta.coletar(...) primeiro"):
+        return None
     df = ler_parquet(caminho_parquet)
+    if df.empty:
+        print("[grafos] parquet vazio — pulando")
+        return None
 
     G_bip = construir_bipartido(df)
     if len(G_bip) == 0:

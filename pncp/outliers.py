@@ -239,7 +239,20 @@ from pathlib import Path  # noqa: E402
 
 @com_gc
 def executar(fazer_iforest=True, fazer_lof=False, fazer_ocsvm=True,
-             fazer_zscore=True, fazer_ensemble=True):
+             fazer_zscore=True, fazer_ensemble=True, forcar=False):
+    from pncp.ram import precisa_de
+    if not precisa_de(config.caminho(config.SUB_P2, "X.npz"), "outliers",
+                       "rode pncp.texto.construir_tfidf(...) primeiro"):
+        return None
+    # Skip inteligente: pula se outliers SÃO MAIS NOVOS que TF-IDF.
+    from pncp.ram import cache_valido
+    saida = config.caminho("outliers")
+    tfidf = config.caminho(config.SUB_P2, "X.npz")
+    if not forcar and cache_valido(saida / "scores_iforest.parquet", tfidf):
+        print(f"[outliers] já rodou e está atualizado — pulando")
+        return None
+    if not forcar and (saida / "scores_iforest.parquet").exists():
+        print(f"[outliers] TF-IDF é mais novo — refazendo")
     saidas = {}
     if fazer_iforest:
         saidas["iforest"] = str(isolation_forest())

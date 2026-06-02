@@ -26,6 +26,101 @@ from pncp.ram import liberar, com_gc
 _RX_DIGITOS = re.compile(r"\D+")
 
 
+def _gerar_readme_revisao(pasta):
+    """Cria README explicando como preencher amostra_revisao_manual.csv."""
+    texto = """# Instruções de revisão manual — amostra_revisao_manual.csv
+
+## Objetivo
+
+Confirmar (ou refutar) se cada contrato listado é, de fato, um caso de
+**subenquadramento** — isto é, um contrato rotulado pelo órgão como
+"serviços gerais" (categoria 8) que deveria ter sido "obras" (7) ou
+"serviços de engenharia" (9).
+
+## O que olhar
+
+| Coluna | O que é | O que significa |
+|---|---|---|
+| `numeroControlePNCP` | ID único no PNCP | Use para consultar o contrato completo |
+| `objeto` | Descrição livre do contrato | Leia para entender o que está sendo contratado |
+| `valor` | Valor estimado em R$ | Contratos > R$ 50.000 demandam licitação formal |
+| `rotulo` | Rótulo atribuído pelo órgão | Sempre "geral" nesta amostra (é o que estamos auditando) |
+| `cnpj` | CNPJ do fornecedor (CONTRATADO) | Use para consultar a empresa |
+| `razao_social` | Razão social do fornecedor | Nome da empresa contratada |
+| `cnaes` | Lista de CNAEs do fornecedor na Receita | CNAEs declarados pela empresa |
+| `tem_cnae_eng` | Bool — fornecedor tem algum CNAE da lista CONFEA? | **True = empresa registrada como prestadora de eng.** |
+| `cnaes_eng` | Quais CNAEs do CONFEA o fornecedor tem | Lista dos códigos específicos |
+| `mk_score_engenharia` | Score 0-9 nos PDFs do contrato | ≥2 = forte indício de rito de engenharia |
+| `revisao_manual` | **VOCÊ PREENCHE AQUI** | Veja abaixo |
+
+## Como preencher `revisao_manual`
+
+Use exatamente um destes valores (case-sensitive):
+
+| Valor | Quando usar |
+|---|---|
+| `subenq` | **Subenquadramento confirmado.** O objeto é claramente obra ou serviço de engenharia (ex: "construção de muro", "reforma estrutural", "pavimentação"). |
+| `ok` | Rotulação correta. O contrato é mesmo de serviço comum (ex: "limpeza predial", "fornecimento de mão de obra para conservação"). |
+| `duv` | Inconclusivo. Objeto ambíguo ("manutenção predial" pode ser ambos) ou falta informação. |
+
+Depois de preencher pelo menos algumas linhas, rode a Célula 14 para
+gerar métrica de **precisão** (quantos % dos suspeitos do pipeline são
+realmente subenquadramento).
+
+## Onde consultar para decidir
+
+1. **PNCP — página do contrato:**
+   `https://pncp.gov.br/app/contratacoes/<numeroControlePNCP>`
+   Mostra objeto completo, valor, modalidade, documentos anexados (TR,
+   edital). Se a página tem "Termo de Referência" ou "Projeto Básico"
+   no PDF, é forte indício de engenharia.
+
+2. **Receita Federal — CNPJ do fornecedor:**
+   `https://servicos.receita.fazenda.gov.br/Servicos/cnpjreva/Cnpjreva_Solicitacao.asp`
+   ou `https://cnpja.com/office/<cnpj>` (cache web).
+   Confirma CNAEs e razão social.
+
+3. **CONFEA — lista de atividades de engenharia:**
+   `https://www.confea.org.br/cadastro-positivo-de-empresas`
+   Empresas listadas exercem oficialmente engenharia.
+
+4. **TCE-SP / TCU — busca de jurisprudência:**
+   Se houver dúvida jurídica sobre classificação, consulte decisões em
+   `https://www.tce.sp.gov.br/jurisprudencia` ou `https://pesquisa.apps.tcu.gov.br`.
+
+5. **Lei 14.133/2021 (Nova Lei de Licitações):**
+   Art. 6º incisos XII (serviços de engenharia), XX e XXI (obras).
+   Define o que se enquadra em cada categoria.
+
+## Como a amostra foi selecionada
+
+- Apenas contratos rotulados `'geral'` no PNCP
+- E que tem CNAE de engenharia (lista CONFEA — 702 CNAEs) no fornecedor
+- **Stratified sampling**: até 3 contratos por órgão para garantir diversidade
+- Limite atual: 100 contratos (subido de 50)
+
+Se você quiser **revisar mais**, edite `pncp/cnae.py` ou chame:
+```python
+pncp.cnae.executar(max_consultas=500)
+```
+
+## Por que vale a pena fazer essa revisão
+
+A revisão manual gera o **ground truth** que valida estatisticamente
+todo o pipeline. Com 100 revisões, conseguimos calcular:
+- Precisão (% dos suspeitos que são reais)
+- Recall (estimativa, se incluir alguns 'ok' como controle)
+- Concordância pipeline × jurista
+
+Sem essa validação, o TCC não consegue afirmar "X% dos suspeitos do
+modelo são subenquadramento real". Com ela, vira evidência sólida.
+"""
+    path = pasta / "README_revisao_manual.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(texto, encoding="utf-8")
+    return path
+
+
 def _so_digitos(s):
     return _RX_DIGITOS.sub("", str(s)) if s else ""
 
@@ -34,7 +129,14 @@ def _so_digitos(s):
 def carregar_cnaes_crea(caminho_excel="cnaes_crea.xlsx"):
     """Lê a planilha do CONFEA e devolve um set com códigos limpos."""
     if not Path(caminho_excel).exists():
-        print(f"[cnae] {caminho_excel} não encontrado — sem lista CREA")
+        print(f"[cnae] ⚠ arquivo {caminho_excel} NÃO encontrado.")
+        print(f"       Sem essa lista, suspeitos_fortes = 0 (impossível cruzar)")
+        print(f"       Como obter:")
+        print(f"        1. Baixe em: https://www.confea.org.br "
+              f"(seção 'Resoluções/CNAE')")
+        print(f"        2. Coloque o .xlsx em: {Path(caminho_excel).resolve()}")
+        print(f"        3. Ou passe o caminho: "
+              f"pncp.cnae.executar(caminho_excel_crea='/caminho/seu.xlsx')")
         return set()
     df = pd.read_excel(caminho_excel, dtype=str)
     # Tenta detectar a coluna que tem códigos CNAE
@@ -111,10 +213,17 @@ def _extrair_cnaes(dados_cnpj):
 def executar(caminho_parquet=None,
              max_consultas=200,
              caminho_excel_crea="cnaes_crea.xlsx"):
+    from pncp.ram import precisa_de
     if caminho_parquet is None:
         caminho_parquet = config.caminho(config.SUB_COLETA, "contratos.parquet")
+    if not precisa_de(caminho_parquet, "cnae",
+                       "rode pncp.coleta.coletar(...) primeiro"):
+        return None
 
     df = ler_parquet(caminho_parquet)
+    if df.empty:
+        print("[cnae] parquet vazio — pulando")
+        return None
     col_cnpj = next((c for c in ("niFornecedor", "cnpjFornecedor", "cnpj")
                       if c in df.columns), None)
     if col_cnpj is None:
@@ -151,6 +260,19 @@ def executar(caminho_parquet=None,
 
     enriq = pd.DataFrame(registros)
     saida = config.caminho(config.SUB_P8, "fornecedores_cnae.parquet")
+
+    # ACUMULA: mescla com fornecedores_cnae anterior, priorizando o novo.
+    if Path(saida).exists():
+        try:
+            anterior = ler_parquet(saida)
+            n_antes = len(anterior)
+            mantidos = anterior[~anterior["cnpj"].isin(enriq["cnpj"])]
+            enriq = pd.concat([mantidos, enriq], ignore_index=True)
+            print(f"[cnae] mesclando: {n_antes} antigos + {len(registros)} novos "
+                  f"→ {len(enriq)} totais")
+        except Exception as e:
+            print(f"[cnae] não foi possível mesclar: {e}")
+
     salvar_parquet(enriq, saida)
 
     # Cruza com df original e gera amostra para revisão manual
@@ -160,11 +282,65 @@ def executar(caminho_parquet=None,
     salvar_parquet(fortes,
                    config.caminho(config.SUB_P8, "suspeitos_fortes.parquet"))
 
-    # Amostra para revisão manual (CSV — usuário preenche 'revisao_manual')
-    amostra = fortes.head(50).copy()
-    amostra["revisao_manual"] = ""
+    # Amostra para revisão manual — PRESERVA revisões já preenchidas.
+    # Em vez de pegar 50 primeiros, faz STRATIFIED SAMPLING por órgão
+    # (evita pegar 50 contratos quase iguais do mesmo órgão).
     saida_csv = config.caminho(config.SUB_P8, "amostra_revisao_manual.csv")
-    amostra.to_csv(saida_csv, index=False)
+    n_revisao = 100  # subido de 50 → 100
+    col_orgao = next((c for c in ("razaoSocialOrgao", "nomeUnidade",
+                                     "orgaoEntidade")
+                       if c in fortes.columns), None)
+    if col_orgao and len(fortes) > n_revisao:
+        # Pega no máx 3 por órgão (mais diversidade na revisão)
+        nova_amostra = (fortes.groupby(col_orgao, observed=True, group_keys=False)
+                          .apply(lambda g: g.head(3)).head(n_revisao).copy())
+        print(f"[cnae] amostra estratificada por órgão (até 3/órgão): "
+              f"{len(nova_amostra)} contratos")
+    else:
+        nova_amostra = fortes.head(n_revisao).copy()
+    nova_amostra["revisao_manual"] = ""
+
+    _gerar_readme_revisao(config.caminho(config.SUB_P8))
+
+    if Path(saida_csv).exists():
+        # Se já existe, preserva linhas com revisao_manual preenchida.
+        # Adiciona NCPs novos que ainda não foram revisados.
+        try:
+            anterior_csv = pd.read_csv(saida_csv)
+            if "revisao_manual" in anterior_csv.columns:
+                ja_revisados = anterior_csv[
+                    anterior_csv["revisao_manual"]
+                    .fillna("").astype(str).ne("")
+                ]
+                # Mantém os já revisados + adiciona novos não vistos
+                novos_ncp = set(nova_amostra["numeroControlePNCP"]) - \
+                            set(ja_revisados["numeroControlePNCP"])
+                a_adicionar = nova_amostra[
+                    nova_amostra["numeroControlePNCP"].isin(novos_ncp)
+                ]
+                amostra_final = pd.concat([ja_revisados, a_adicionar],
+                                            ignore_index=True)
+                amostra_final.to_csv(saida_csv, index=False)
+                print(f"[cnae] revisão manual preservada: "
+                      f"{len(ja_revisados)} já revisados + "
+                      f"{len(a_adicionar)} novos = {len(amostra_final)}")
+            else:
+                nova_amostra.to_csv(saida_csv, index=False)
+        except Exception as e:
+            print(f"[cnae] erro ao preservar revisões: {e}")
+            # Backup do CSV antigo antes de sobrescrever
+            try:
+                from datetime import datetime as _dt
+                bak = saida_csv.with_suffix(
+                    f".bak.{_dt.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                )
+                Path(saida_csv).rename(bak)
+                print(f"[cnae] backup salvo em {bak.name}")
+            except Exception:
+                pass
+            nova_amostra.to_csv(saida_csv, index=False)
+    else:
+        nova_amostra.to_csv(saida_csv, index=False)
 
     metricas = {
         "n_cnpjs_consultados": int(len(cnpjs)),

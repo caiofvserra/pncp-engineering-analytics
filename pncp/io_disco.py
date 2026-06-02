@@ -98,10 +98,18 @@ def concatenar_parquets(padrao_glob, caminho_saida) -> Path:
     """
     Lê todos parquets que casam com o glob e concatena num único arquivo.
     Usa PyArrow Dataset para não materializar tudo em RAM ao mesmo tempo.
+
+    Aceita glob absoluto (ex: '/dados/coleta/contratos_SP_*.parquet')
+    OU relativo (ex: 'dados/coleta/contratos_*.parquet').
     """
+    import glob as _glob
     import pyarrow.dataset as ds
     import pyarrow.parquet as pq
-    dataset = ds.dataset(list(Path(".").glob(padrao_glob)), format="parquet")
+
+    arquivos = [Path(p) for p in _glob.glob(str(padrao_glob))]
+    if not arquivos:
+        raise FileNotFoundError(f"nenhum arquivo casa com '{padrao_glob}'")
+    dataset = ds.dataset(arquivos, format="parquet")
     tabela = dataset.to_table()
     caminho_saida = Path(caminho_saida)
     caminho_saida.parent.mkdir(parents=True, exist_ok=True)

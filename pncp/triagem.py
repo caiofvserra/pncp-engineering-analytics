@@ -42,35 +42,43 @@ from pncp.ram import liberar, com_gc
 # Cada padrão é uma frase/expressão que, se aparece no objeto, é
 # praticamente certo que o contrato é de obra/engenharia.
 PADROES_OBVIOS = [
-    # Construção e reforma
-    r"\bconstruc[aã]o\s+(de|da|do|dos|das)\b",
-    r"\breforma\s+(de|da|do|dos|das|estrutural|predial|civil)\b",
-    r"\bampliac[aã]o\s+(de|da|do|dos|das)\b.*(predio|escola|hospital|ponte|ed[ií]ficio)",
+    # Construção e reforma — específicos para evitar "construção da relação"
+    r"\bconstruc[aã]o\s+(de|do|da|dos|das)\s+"
+    r"(predio|edif[ií]cio|escola|creche|posto|ubs|upa|hospital|"
+    r"unidade\s+de|centro\s+de|gin[aá]sio|quadra|ponte|viaduto|"
+    r"passarela|bueiro|muro|cerca|reservat[oó]rio|po[cç]o)\b",
+    r"\breforma\s+(estrutural|predial|geral|completa|de\s+coberta|"
+    r"com\s+amplia[cç][aã]o)\b",
+    r"\bampliac[aã]o\s+(de|do|da)\s+"
+    r"(predio|escola|hospital|ponte|edif[ií]cio|unidade)\b",
     # Infraestrutura viária
-    r"\bpavimentac[aã]o\s+(asf[aá]ltica|com\s+asfalto|de\s+via|de\s+rua)\b",
+    r"\bpavimentac[aã]o\s+(asf[aá]ltica|com\s+asfalto|em\s+(cbuq|cbq)|"
+    r"de\s+via|de\s+rua|paralelep[ií]pedo)\b",
     r"\brecapeamento\s+asf[aá]ltico\b",
-    r"\bdrenagem\s+(pluvial|urbana|de\s+via)\b",
+    r"\bdrenagem\s+(pluvial|urbana|de\s+via|de\s+águas)\b",
     r"\bterraplenagem\b",
+    r"\bcalcamento\s+(parael[ei]p[ií]pedo|em\s+pedra)\b",
     # Obras de arte
-    r"\bconstruc[aã]o\s+de\s+(ponte|viaduto|passarela|bueiro)\b",
     r"\bobra\s+civil\b",
     r"\bobra\s+de\s+arte\s+especial\b",
     # Edificações
     r"\bedificac[aã]o\s+(nova|escolar|hospitalar|p[uú]blica)\b",
-    r"\bconstruc[aã]o\s+de\s+(escola|creche|posto|ubs|upa|hospital)\b",
     # Saneamento e infraestrutura
-    r"\brede\s+de\s+(esgoto|[aá]gua|distribuic[aã]o)\b",
+    r"\brede\s+de\s+(esgoto|[aá]gua|distribuic[aã]o\s+de)\b",
     r"\bestac[aã]o\s+de\s+(tratamento|elevac[aã]o|bombeamento)\b",
     r"\bsubestac[aã]o\s+el[eé]trica\b",
-    # Materiais de obra
-    r"\bestrutura\s+(met[aá]lica|de\s+concreto)\b",
+    # Materiais de obra (se citados no objeto, é eng)
+    r"\bestrutura\s+(met[aá]lica|de\s+concreto\s+armado)\b",
     r"\bconcreto\s+armado\b",
     r"\balvenaria\s+estrutural\b",
     # Documentos técnicos no objeto
-    r"\bprojeto\s+(b[aá]sico|executivo|arquitet[oô]nico|estrutural)\b",
+    r"\bprojeto\s+(b[aá]sico|executivo|arquitet[oô]nico|estrutural|"
+    r"el[eé]trico|hidr[oô]\w+)\b",
     r"\bmemorial\s+descritivo\b",
-    # Profissionais (se citados no objeto, é eng)
-    r"\bengenharia\s+civil\b",
+    r"\bplanilha\s+or[cç]ament[aá]ria\b",
+    r"\bart\s+(do\s+)?crea\b",
+    # Profissionais (se citados no objeto)
+    r"\bengenharia\s+(civil|el[eé]trica|hidr[oô]\w+|sanit[aá]ria)\b",
     r"\barquitet[oô]nico\s+e\s+complementares\b",
 ]
 PADROES_OBVIOS_RX = [re.compile(p, flags=re.IGNORECASE) for p in PADROES_OBVIOS]
@@ -95,32 +103,20 @@ def eh_obvio_engenharia(texto):
 
 
 # ── Sinais de rito de engenharia (Lei 14.133/2021) ───────────────────────────
-# Estes sinais aparecem nos PDFs (Camada 2) ou em campos específicos do
-# contrato. A presença de 2+ sinais indica que o processo seguiu o rito
-# formal de engenharia, mesmo se o rótulo veio errado.
-SINAIS_RITO = (
-    "art",                         # Anotação de Responsabilidade Técnica
-    "rrt",                         # Registro de Responsabilidade Técnica
-    "memorial",                    # Memorial descritivo
-    "projeto_executivo",           # Projeto executivo
-    "as_built",                    # As-built
-    "crea",                        # CREA citado
-    "engenheiro",                  # Profissional eng. citado
-    "norma_tecnica",               # Norma técnica
-    "abnt_nbr",                    # ABNT NBR
-    "anotacao_responsabilidade",   # ART por extenso
-)
-LIMIAR_RITO = 2  # ≥2 sinais = rito seguido
+# Cada sinal corresponde a uma categoria de marcador em pncp/_marcadores.py
+# (mk_<NOME>_presente). Presença de ≥2 categorias = rito seguido.
+# Lei 6.496/1977 obriga ART; Lei 12.378/2010 obriga RRT.
+from pncp._marcadores import MARCADORES_ENGENHARIA as _MARC
+
+SINAIS_RITO = tuple(f"mk_{nome}_presente" for nome in _MARC.keys())
+LIMIAR_RITO = 2
 
 
 def contar_sinais_rito(linha_features_pdf):
-    """
-    Recebe uma linha do parquet de features de PDF (Camada 2) e
-    conta quantos sinais de rito apareceram.
-    """
+    """Conta quantas categorias de marcadores estão presentes no PDF."""
     if linha_features_pdf is None:
         return 0
-    return sum(int(linha_features_pdf.get(s, 0) or 0) > 0 for s in SINAIS_RITO)
+    return sum(bool(linha_features_pdf.get(s, False)) for s in SINAIS_RITO)
 
 
 # ── Pipeline ─────────────────────────────────────────────────────────────────
@@ -133,9 +129,16 @@ def executar(caminho_parquet=None):
     Saída: dados/triagem/triagem.parquet com colunas extras.
     Também salva resumo.json com contagens.
     """
+    from pncp.ram import precisa_de
     if caminho_parquet is None:
         caminho_parquet = config.caminho(config.SUB_COLETA, "contratos.parquet")
+    if not precisa_de(caminho_parquet, "triagem",
+                       "rode pncp.coleta.coletar(...) primeiro"):
+        return None
     df = ler_parquet(caminho_parquet)
+    if df.empty:
+        print("[triagem] parquet vazio — pulando")
+        return None
 
     # 1. Pré-filtro lexical sobre o objeto
     print("[triagem] aplicando pré-filtro lexical...")
@@ -149,11 +152,14 @@ def executar(caminho_parquet=None):
         print("[triagem] cruzando com features de PDF (Camada 2)...")
         feats = ler_parquet(pdfs_path)
         df = df.merge(
-            feats[["numeroControlePNCP"] + list(SINAIS_RITO)],
+            feats[["numeroControlePNCP"] +
+                  [c for c in SINAIS_RITO if c in feats.columns]],
             on="numeroControlePNCP", how="left",
         )
         df["n_sinais_rito"] = (
-            df[list(SINAIS_RITO)].fillna(0).gt(0).sum(axis=1).astype("int8")
+            df[[c for c in SINAIS_RITO if c in df.columns]]
+              .fillna(False).infer_objects(copy=False).astype(bool)
+              .sum(axis=1).astype("int8")
         )
         df["seguiu_rito"] = df["n_sinais_rito"] >= LIMIAR_RITO
     else:
@@ -190,7 +196,27 @@ def executar(caminho_parquet=None):
     salvar_json(resumo, config.caminho("triagem", "resumo.json"))
     print(f"[triagem] {resumo['distribuicao_triagem']}")
     liberar(df)
+    mostrar()
     return saida
+
+
+def mostrar():
+    """Resumo da triagem: óbvios, sinais de rito, distribuição final."""
+    from pncp.io_disco import ler_json
+    p = config.caminho("triagem", "resumo.json")
+    if not p.exists():
+        print("[triagem.mostrar] rode pncp.triagem.executar() primeiro")
+        return
+    r = ler_json(p)
+    print(f"\n🔎 Triagem — {r['n_total']:,} contratos")
+    print(f"   óbvios de engenharia (rotulo='geral'): {r['n_geral_obvio']}")
+    print(f"   classificação:")
+    for k, v in r["distribuicao_triagem"].items():
+        print(f"     {k}: {v:,}")
+    if r.get("padrao_obvio_top"):
+        print(f"\n   padrões mais frequentes:")
+        for padrao, n in list(r["padrao_obvio_top"].items())[:5]:
+            print(f"     {n:4d}× {padrao[:60]}")
 
 
 def listar_para_ml(caminho_triagem=None):
