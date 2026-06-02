@@ -172,12 +172,18 @@ def gerar_markdown():
     f1_eng = (metricas.get("holdout", {}).get(melhor, {})
               .get("f1_engenharia", 0))
 
+    # Contador autoincremental para evitar numeração duplicada/saltada
+    n_secao = [0]
+    def _secao(titulo):
+        n_secao[0] += 1
+        return f"## {n_secao[0]}. {titulo}"
+
     linhas = [
         "# Relatório TCC — Subenquadramento de Engenharia no PNCP",
         "",
         f"**Total de contratos analisados:** {stats['n_total']:,}",
         "",
-        "## 1. Distribuição por rótulo (Lei 14.133/2021)",
+        _secao("Distribuição por rótulo (Lei 14.133/2021)"),
         "",
     ]
     for k, v in stats["distribuicao"].items():
@@ -186,7 +192,7 @@ def gerar_markdown():
     if triagem:
         linhas += [
             "",
-            "## 2. Triagem determinística (etapa 0)",
+            _secao("Triagem determinística (etapa 0)"),
             "",
             f"- Contratos 'geral' óbvios de engenharia: "
             f"**{triagem.get('n_geral_obvio', 0)}**",
@@ -202,12 +208,12 @@ def gerar_markdown():
             "**provável violação da Lei 14.133/2021**",
             "- `rotulacao_incorreta_processo_ok`: óbvio engenharia + rito "
             "seguido → erro de cadastro, mas processo correto",
-            "- `ambiguo`: precisa de classificador ML (ver seção 3)",
+            "- `ambiguo`: precisa de classificador ML (ver próxima seção)",
         ]
 
     linhas += [
         "",
-        "## 3. Classificação supervisionada (ML — para os ambíguos)",
+        _secao("Classificação supervisionada (ML — para os ambíguos)"),
         "",
         f"- Melhor modelo: **{melhor}**",
         f"- F1-engenharia (holdout): **{f1_eng:.4f}**",
@@ -222,26 +228,26 @@ def gerar_markdown():
             linhas.append(f"- McNemar LR vs RF: p={p:.4f}")
 
     if pdfs:
-        linhas += ["", "## 3. PDFs (Camada 2)", "",
+        linhas += ["", _secao("PDFs (Camada 2)"), "",
                     f"- Contratos com PDF processado: {pdfs.get('n_contratos_processados', 0)}",
                     f"- Score médio de engenharia em PDF: "
                     f"{pdfs.get('media_score', 0):.2f}"]
 
     if cnae:
-        linhas += ["", "## 4. Enriquecimento via CNAE",
+        linhas += ["", _secao("Enriquecimento via CNAE"),
                     f"- CNPJs consultados: {cnae.get('n_cnpjs_consultados', 0)}",
                     f"- Com CNAE de engenharia: {cnae.get('n_com_cnae_eng', 0)}",
                     f"- **Suspeitos fortes** (geral + CNAE eng): "
                     f"{cnae.get('n_suspeitos_fortes', 0)}"]
 
     if grafos:
-        linhas += ["", "## 5. Análise de grafos",
+        linhas += ["", _secao("Análise de grafos"),
                     f"- {grafos.get('n_orgaos', 0)} órgãos × "
                     f"{grafos.get('n_fornecedores', 0)} fornecedores",
                     f"- Red flags: {grafos.get('red_flags_count', 0)}"]
 
     if "n_suspeitos_total" in stats:
-        linhas += ["", "## 6. Consolidação final",
+        linhas += ["", _secao("Consolidação final"),
                     f"- Suspeitos avaliados: {stats['n_suspeitos_total']:,}"]
         if "valor_n2_sinais" in stats:
             linhas.append(
@@ -254,7 +260,7 @@ def gerar_markdown():
                     eda["alerta_temporal"].get("mensagem", "")]
 
     # ── Interpretação dos resultados (contextualiza os números) ──────────
-    linhas += ["", "## 7. Interpretação dos resultados", ""]
+    linhas += ["", _secao("Interpretação dos resultados"), ""]
 
     n_total = stats.get("n_total", 0)
     dist = stats.get("distribuicao", {})
@@ -362,6 +368,16 @@ def gerar_markdown():
             f"(SMOTE opcional), bootstrap para IC.",
         ]
 
+    # ── Glossário (sempre no final do relatório) ────────────────────────
+    linhas += ["", _secao("Glossário"), ""]
+    # Remove duplicatas mantendo a primeira definição de cada termo
+    vistos = set()
+    for termo, definicao in GLOSSARIO.items():
+        if termo in vistos:
+            continue
+        vistos.add(termo)
+        linhas.append(f"- **{termo}**: {definicao}")
+
     saida = config.caminho(config.SUB_P9, "relatorio.md")
     saida.write_text("\n".join(linhas), encoding="utf-8")
     print(f"[relatorio] markdown em {saida}")
@@ -462,15 +478,10 @@ GLOSSARIO = {
     "Baseline majoritário": "Modelo trivial que sempre prevê a classe mais comum. "
                               "Em 80% geral, ele acerta 80% das vezes (acurácia) mas "
                               "F1 da classe minoritária = 0. Mede o piso real.",
-    "Subenquadramento real": "Contrato de engenharia rotulado 'geral' E que não "
-                                "seguiu o rito (ART/RRT, memorial, projeto). Viola "
-                                "a Lei 14.133/2021 + Lei 6.496/1977.",
     "Mudança de escopo (Camada 3)": "Contrato original 'geral' que recebeu aditivo "
                                        "com marcadores de engenharia. A licitação não "
                                        "seguiu rito formal mas a execução incluiu "
                                        "trabalho que exigiria.",
-    "Bootstrap": "Reamostragem com reposição (n vezes) para estimar IC de uma "
-                   "métrica. n=200 dá IC95% razoável; n=1000 é mais preciso.",
     "ROC-AUC": "Área sob a curva ROC. 0.5 = aleatório, 1.0 = perfeito. Mede "
                   "capacidade de ranking (independente de threshold).",
 }

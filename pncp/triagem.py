@@ -158,7 +158,8 @@ def executar(caminho_parquet=None):
         )
         df["n_sinais_rito"] = (
             df[[c for c in SINAIS_RITO if c in df.columns]]
-              .fillna(False).astype(bool).sum(axis=1).astype("int8")
+              .fillna(False).infer_objects(copy=False).astype(bool)
+              .sum(axis=1).astype("int8")
         )
         df["seguiu_rito"] = df["n_sinais_rito"] >= LIMIAR_RITO
     else:

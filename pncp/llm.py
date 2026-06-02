@@ -1,8 +1,7 @@
 """
 Validação semântica de suspeitos via LLM.
 
-Inspirado nas aulas 11/12 do MBA (Marcacini, ICMC/USP). Roda Llama 3.1
-local via Ollama — gratuito, privado, não depende de API paga.
+Roda Llama 3.1 local via Ollama — gratuito, privado, não depende de API paga.
 
 Uso típico:
     pncp.llm.iniciar_ollama()              # 1x por sessão
@@ -288,7 +287,6 @@ def mostrar(top_n=10):
 
 
 # ── Extração de entidades estruturadas via LLM ──────────────────────────────
-# Inspirado no notebook 14 (NER + LLM) e Tutoria 13_05 (extração)
 SYSTEM_NER = """Você extrai entidades estruturadas de objetos de contratos
 públicos brasileiros do PNCP. Identifique e retorne em JSON:
 
@@ -312,10 +310,9 @@ Responda APENAS no JSON, sem prefácio."""
 def extrair_entidades_llm(top_n=30, modelo="llama3.1", forcar=False):
     """
     Para os top suspeitos, extrai entidades estruturadas via LLM.
-    Notebook 14 + tutoria 13_05 — extração estruturada de informações.
-
-    Mais rico que NER do Spacy: identifica intenção semântica do contrato
-    além das menções nominais.
+    Extração estruturada de informações: mais rico que NER do Spacy,
+    pois identifica intenção semântica do contrato além das menções
+    nominais.
     """
     susp_path = config.caminho(config.SUB_P9,
                                  "suspeitos_consolidados.parquet")
@@ -392,7 +389,7 @@ def resumir_objetos(amostra=20, modelo="llama3.1"):
 
 
 # ── Geração de indicadores por cluster ──────────────────────────────────────
-# Notebook 12 P2: LLM analisa cluster de docs e gera indicador estruturado
+# LLM analisa cluster de docs e gera indicador estruturado por cluster
 SYSTEM_INDICADOR = """Você é analista de inteligência analítica especializado
 em contratações públicas brasileiras. Recebe uma amostra de objetos de
 contratos que foram agrupados por similaridade semântica (cluster).
@@ -417,7 +414,7 @@ def gerar_indicadores(top_n_clusters=10, n_por_cluster=5,
                        modelo="llama3.1", forcar=False):
     """
     Para cada um dos top-N clusters de contratos similares, gera um
-    indicador-síntese via LLM. Notebook 12 P2.
+    indicador-síntese via LLM.
 
     Pré-requisito: rodar pncp.grafos_semanticos.construir() antes.
     """
@@ -467,8 +464,8 @@ def _ler_json_safe(path):
 
 
 # ── Agente simples LLM + ferramentas ────────────────────────────────────────
-# Notebook 18: agente com Tools. Versão enxuta sem LangChain (que é pesado
-# e tem mudanças quebradiças). Loop: prompt → LLM escolhe tool → executa →
+# Agente com Tools. Versão enxuta sem LangChain (que é pesado e tem
+# mudanças quebradiças). Loop: prompt → LLM escolhe tool → executa →
 # retorna resposta.
 SYSTEM_AGENTE = """Você é um agente analítico para auditoria de contratos
 públicos. Tem acesso a estas ferramentas (uma por chamada):
@@ -540,7 +537,7 @@ _TOOLS = {
 
 def agente(pergunta, modelo="llama3.1", max_passos=4):
     """
-    Agente LLM + ferramentas. Notebook 18.
+    Agente LLM + ferramentas.
 
     Loop: o LLM lê a pergunta, decide qual ferramenta chamar, recebe a
     saída e decide se continua ou responde.

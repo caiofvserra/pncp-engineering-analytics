@@ -129,7 +129,14 @@ def _so_digitos(s):
 def carregar_cnaes_crea(caminho_excel="cnaes_crea.xlsx"):
     """Lê a planilha do CONFEA e devolve um set com códigos limpos."""
     if not Path(caminho_excel).exists():
-        print(f"[cnae] {caminho_excel} não encontrado — sem lista CREA")
+        print(f"[cnae] ⚠ arquivo {caminho_excel} NÃO encontrado.")
+        print(f"       Sem essa lista, suspeitos_fortes = 0 (impossível cruzar)")
+        print(f"       Como obter:")
+        print(f"        1. Baixe em: https://www.confea.org.br "
+              f"(seção 'Resoluções/CNAE')")
+        print(f"        2. Coloque o .xlsx em: {Path(caminho_excel).resolve()}")
+        print(f"        3. Ou passe o caminho: "
+              f"pncp.cnae.executar(caminho_excel_crea='/caminho/seu.xlsx')")
         return set()
     df = pd.read_excel(caminho_excel, dtype=str)
     # Tenta detectar a coluna que tem códigos CNAE

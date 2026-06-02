@@ -1,9 +1,6 @@
 """
 Grafo semântico de contratos via k-NN sobre embeddings.
 
-Baseado nos notebooks 03 (BOW + k-NN), 09 P3 (Label Propagation),
-12 P2 (LLM gera indicadores por cluster) e 18 (Agentes) do MBA.
-
 Diferente de pncp.grafos (que é bipartido órgão↔fornecedor), aqui o
 grafo conecta CONTRATOS por similaridade semântica. Comunidades
 detectadas = padrões repetidos de subenquadramento.
@@ -138,8 +135,8 @@ def propagar_rotulos(seeds_subenq, df_clusters=None):
     Dada uma lista de NCPs confirmados como subenquadramento, propaga
     rótulo via cluster: todo contrato no MESMO cluster fica como candidato.
 
-    Notebook 09 P3 (simple regularization). Implementação simplificada
-    por cluster (vs random walk completo).
+    Implementação simplificada (label propagation por cluster, vs
+    random walk completo).
     """
     if df_clusters is None:
         p = config.caminho("grafos_semanticos", "clusters_contratos.parquet")

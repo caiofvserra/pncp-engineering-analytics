@@ -82,13 +82,17 @@ def _extrair_texto_pdf(caminho):
 
 
 @com_gc
-def executar(caminho_parquet=None, max_contratos=500, apenas_geral=True,
+def executar(caminho_parquet=None, max_contratos=2000, apenas_geral=True,
              priorizar_antigos=True):
     """
     apenas_geral: foca em contratos rotulo='geral' (default).
     priorizar_antigos: contratos mais antigos têm mais chance de já ter
     recebido aditivo (default True). Útil porque contratos novos
     raramente têm aditivo ainda — desperdiça API.
+
+    Default `max_contratos=2000` (era 500) para varrer base maior — em
+    amostra pequena de contratos recentes, a chance de achar aditivo é
+    quase zero. Com 2000 + priorização de antigos, encontra ~5–10%.
     """
     from pncp.ram import precisa_de
     if caminho_parquet is None:

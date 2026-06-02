@@ -312,7 +312,17 @@ def executar(caminho_parquet=None, max_contratos=1000, ranking_path=None,
         if not docs_relevantes:
             continue
 
-        # Limita a 3 PDFs/contrato (TR + PB + Edital normalmente bastam)
+        # Prioriza pela ordem de TIPOS_RELEVANTES_ENGENHARIA:
+        # TR (4), PB (6), ETP (7), Proj. Executivo (8), Anteprojeto (5),
+        # Edital (2), Minuta (3), Contrato (12), Aditivo (14).
+        # Marcadores aparecem MUITO mais em TR/PB/ETP do que em Contrato;
+        # baixar Contrato em vez de TR desperdiça banda e degrada a Camada 2.
+        ordem_prioridade = {t: i for i, t in enumerate(TIPOS_RELEVANTES_ENGENHARIA)}
+        docs_relevantes.sort(
+            key=lambda dt: ordem_prioridade.get(dt[1], 999),
+        )
+
+        # Limita a 3 PDFs/contrato (TR + PB + ETP normalmente bastam)
         for d, tipo_id in docs_relevantes[:3]:
             seq_doc = d.get("sequencialDocumento") or d.get("sequencial")
             if not seq_doc:

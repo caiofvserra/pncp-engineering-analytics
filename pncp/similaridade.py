@@ -1,9 +1,8 @@
 """
 Busca semântica de contratos similares — RAG para investigação.
 
-Baseado nos notebooks 08 (Embeddings P2 — SBERT) e Tutoria 13_05 (RAG).
 Dado um contrato suspeito confirmado, encontra outros parecidos no
-corpus que merecem o mesmo escrutínio.
+corpus que merecem o mesmo escrutínio usando embeddings SBERT.
 
 Útil para o jurista: "achei 1 caso de subenquadramento — quais outros
 são parecidos?". A LLM/auditor sabe que se o padrão repete em N órgãos
@@ -33,7 +32,7 @@ def _carregar_embeddings():
 def buscar_similares(num_controle_pncp, k=20, modelo="sentence-bert"):
     """
     Para um contrato dado, retorna os top-K mais similares por cosseno
-    no espaço de embeddings. Notebook 08 — `util.cos_sim` da SBERT.
+    no espaço de embeddings (estilo `util.cos_sim` da SBERT).
 
     Use depois de pncp.embeddings.gerar(). Se quiser buscar por texto
     livre (não NCP), use `buscar_por_texto()` abaixo.

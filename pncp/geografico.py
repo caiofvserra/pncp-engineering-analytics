@@ -1,14 +1,13 @@
 """
 Análise geográfica e NER de contratos.
 
-Baseado no notebook 14 (Informação Geográfica + NER) do MBA.
 Combina:
   - Reconhecimento de Entidades Nomeadas (Spacy PT) sobre objetos
   - Geocoding de municípios (via prefeitura → coordenadas)
   - Mapa Folium HeatMap dos contratos suspeitos
 
-Útil para o TCC: mostra DISTRIBUIÇÃO ESPACIAL de subenquadramento.
-Se um município concentra muitos suspeitos, vale investigação local.
+Mostra a DISTRIBUIÇÃO ESPACIAL de subenquadramento. Se um município
+concentra muitos suspeitos, vale investigação local.
 """
 
 import json
@@ -82,7 +81,7 @@ def extrair_entidades(amostra=200, modelo="pt_core_news_sm"):
 def geocodificar_municipios(amostra=None):
     """
     Geocodifica municípios via OpenStreetMap (geopy/Nominatim).
-    Notebook 14 — cuidado: rate limit ~1 req/s.
+    Cuidado: Nominatim impõe rate limit ~1 req/s.
 
     Cacheia resultados em geografico/cache_geocoding.json.
     """
@@ -135,8 +134,6 @@ def mapa_suspeitos(html_path=None):
     """
     Mapa interativo (Folium HeatMap) dos contratos suspeitos por município.
     Salva como HTML — abra no navegador para zoom e pop-ups.
-
-    Notebook 14 — folium.plugins.HeatMap.
     """
     try:
         import folium

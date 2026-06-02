@@ -1,8 +1,8 @@
 """
 Análise temporal de contratos PNCP.
 
-Baseado nos notebooks 03 (Decomposição) e 11 (Outras tarefas — Change
-Point Detection) do MBA Inteligência Analítica (Marcacini, ICMC/USP).
+Aplica decomposição STL, detecção de change points (ruptures) e
+forecasting (Prophet/ARIMA) sobre séries mensais de contagem.
 
 Funções:
   - decompor_serie(rotulo)         — tendência + sazonalidade + ruído
@@ -48,9 +48,9 @@ def _serie_mensal(rotulo=None):
 def decompor_serie(rotulo="geral", modelo="additive"):
     """
     Decomposição STL/clássica: tendência + sazonalidade + ruído.
-    Notebook 03 do curso. Útil para detectar se a sazonalidade dos
-    contratos 'geral' segue padrão diferente de 'engenharia' (sinal
-    indireto de mudança de comportamento).
+    Útil para detectar se a sazonalidade dos contratos 'geral' segue
+    padrão diferente de 'engenharia' (sinal indireto de mudança de
+    comportamento).
     """
     try:
         from statsmodels.tsa.seasonal import seasonal_decompose
@@ -83,8 +83,8 @@ def decompor_serie(rotulo="geral", modelo="additive"):
 @com_gc
 def detectar_change_points(rotulo="geral", n_pontos=4):
     """
-    Detecta momentos de quebra estrutural na série temporal.
-    Notebook 11 (Outras tarefas — ruptures).
+    Detecta momentos de quebra estrutural na série temporal usando
+    a biblioteca ruptures (algoritmo PELT com kernel RBF).
 
     Útil para identificar SE houve mudança brusca de critério de
     cadastro (ex: pré e pós algum decreto/portaria).
@@ -134,10 +134,10 @@ def detectar_change_points(rotulo="geral", n_pontos=4):
 def forecast_volume(rotulo="geral", n_meses=12):
     """
     Projeção da quantidade futura de contratos.
-    Notebook 07 (Forecasting). Usa Prophet se instalado, senão ARIMA.
+    Usa Prophet se instalado, senão ARIMA.
 
-    Útil para o TCC mostrar tendência projetada — quantos contratos
-    'geral' são esperados nos próximos N meses.
+    Mostra tendência projetada — quantos contratos 'geral' são
+    esperados nos próximos N meses.
     """
     s = _serie_mensal(rotulo)
     if s is None or len(s) < 12:

@@ -65,42 +65,62 @@ def lda(n_topicos=8, n_palavras=10, max_amostras=200_000):
 
 
 # ── Label Propagation: semi-supervisionado ───────────────────────────────────
-def label_propagation(frac_rotulada=0.3, max_amostras=20000):
+def label_propagation(frac_rotulada=0.5, max_amostras=15000):
     """
     Esconde parte dos rótulos e propaga via grafo de similaridade.
     Útil quando suspeitamos que muitos 'geral' são na verdade 'engenharia'.
+
+    Default `frac_rotulada=0.5` (era 0.3) garante massa rotulada
+    suficiente para propagação convergir; com 0.3 a recuperação fica
+    artificialmente baixa em corpus desbalanceado (engenharia ~6%).
     """
     from sklearn.semi_supervised import LabelPropagation
     from sklearn.decomposition import TruncatedSVD
+    from sklearn.preprocessing import LabelEncoder
 
     art = carregar_tfidf()
     X = art["X"]
-    y = art["labels"]["rotulo"].astype(str).values
+    y_str = art["labels"]["rotulo"].astype(str).values
 
     # Reduz dimensionalidade — Label Propagation não escala em alta dim.
     if X.shape[0] > max_amostras:
-        idx = np.random.default_rng(config.SEED).choice(
-            X.shape[0], size=max_amostras, replace=False,
-        )
+        # Subsample estratificado para garantir minorias representadas
+        from sklearn.model_selection import StratifiedShuffleSplit
+        sss = StratifiedShuffleSplit(n_splits=1, train_size=max_amostras,
+                                       random_state=config.SEED)
+        idx, _ = next(sss.split(np.zeros(len(y_str)), y_str))
         X = X[idx]
-        y = y[idx]
+        y_str = y_str[idx]
 
     svd = TruncatedSVD(n_components=64, random_state=config.SEED)
     X_red = svd.fit_transform(X).astype("float32")
+    # L2-normaliza pra knn ficar coerente
+    from sklearn.preprocessing import normalize
+    X_red = normalize(X_red, axis=1)
+
+    # LabelPropagation aceita -1 apenas em rótulos numéricos
+    le = LabelEncoder()
+    y_int = le.fit_transform(y_str)
 
     rng = np.random.default_rng(config.SEED)
-    mask_oculta = rng.random(len(y)) > frac_rotulada
-    y_treino = y.copy()
-    y_treino[mask_oculta] = "-1"
+    mask_oculta = rng.random(len(y_int)) > frac_rotulada
+    y_treino = y_int.copy()
+    y_treino[mask_oculta] = -1
 
-    modelo = LabelPropagation(kernel="knn", n_neighbors=10, n_jobs=-1)
+    # knn com n_neighbors=7 e gamma controlado para evitar sobre-suavização
+    modelo = LabelPropagation(kernel="knn", n_neighbors=7, max_iter=1000,
+                                n_jobs=-1)
     modelo.fit(X_red, y_treino)
-    pred = modelo.transduction_
+    pred = le.inverse_transform(modelo.transduction_)
+    y_str_arr = np.asarray(y_str)
 
     metricas = {
-        "n_amostras": int(len(y)),
+        "n_amostras": int(len(y_str_arr)),
         "n_ocultas": int(mask_oculta.sum()),
-        "acuracia_recuperacao": float((pred[mask_oculta] == y[mask_oculta]).mean()),
+        "frac_rotulada": float(frac_rotulada),
+        "acuracia_recuperacao": float(
+            (pred[mask_oculta] == y_str_arr[mask_oculta]).mean()
+        ),
         "distrib_predicao": pd.Series(pred).value_counts().to_dict(),
     }
     saida = config.caminho(config.SUB_P3, "label_propagation.json")
@@ -112,10 +132,14 @@ def label_propagation(frac_rotulada=0.3, max_amostras=20000):
 
 
 # ── Apriori: regras de associação em metadados ──────────────────────────────
-def apriori(min_support=0.05, min_confidence=0.6):
+def apriori(min_support=0.02, min_confidence=0.5):
     """
     Encontra regras tipo 'modalidade=Pregão & valor>X → rotulo=geral'.
     Trabalha apenas com colunas categóricas/binadas, não TF-IDF.
+
+    Defaults afrouxados (min_support=0.02 vs 0.05, min_confidence=0.5 vs 0.6)
+    porque suporte 5% exclui categorias minoritárias relevantes. Inclui mais
+    colunas (uf, ano) para gerar regras com contexto temporal/geográfico.
     """
     try:
         from mlxtend.frequent_patterns import apriori as _ap, association_rules
@@ -126,17 +150,23 @@ def apriori(min_support=0.05, min_confidence=0.6):
     caminho = config.caminho(config.SUB_COLETA, "contratos.parquet")
     df = ler_parquet(caminho)
 
-    # Discretiza para boolean
-    cols_cat = [c for c in ("modalidadeNome", "rotulo") if c in df.columns]
+    # Discretiza para boolean — inclui mais variáveis contextuais
+    cols_cat = [c for c in ("modalidadeNome", "rotulo", "uf", "anoPublicacao")
+                if c in df.columns]
     bin_df = pd.get_dummies(df[cols_cat].astype(str), prefix_sep="=")
     if "valor" in df.columns:
-        bin_df["valor_alto"] = df["valor"] > df["valor"].quantile(0.75)
-        bin_df["valor_baixo"] = df["valor"] < df["valor"].quantile(0.25)
+        v = pd.to_numeric(df["valor"], errors="coerce")
+        bin_df["valor_alto"] = (v > v.quantile(0.75)).fillna(False)
+        bin_df["valor_baixo"] = (v < v.quantile(0.25)).fillna(False)
 
     itens = _ap(bin_df, min_support=min_support, use_colnames=True)
+    if itens.empty:
+        print(f"[avancado] Apriori: nenhum item frequente com "
+              f"min_support={min_support}")
+        return None
     regras = association_rules(itens, metric="confidence",
                                 min_threshold=min_confidence)
-    regras = regras.sort_values("lift", ascending=False).head(50)
+    regras = regras.sort_values("lift", ascending=False).head(100)
     # Converte frozensets para lista de strings (parquet não aceita frozenset)
     regras["antecedents"] = regras["antecedents"].apply(lambda s: list(s))
     regras["consequents"] = regras["consequents"].apply(lambda s: list(s))

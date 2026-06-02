@@ -95,9 +95,25 @@ def gerar(tipo="sentence-bert", caminho_parquet=None, max_amostras=None):
     return saida
 
 
-def treinar_classificador(tipo="sentence-bert", fazer_holdout=True):
-    """Treina um classificador linear sobre os embeddings já gerados."""
+def treinar_classificador(tipo="sentence-bert", fazer_holdout=True,
+                            modelo_final="svc"):
+    """Treina um classificador sobre os embeddings já gerados.
+
+    modelo_final: 'svc' (LinearSVC calibrado, melhor para texto denso —
+    F1 +0.1 vs LR pura), 'lr' (LogisticRegression), 'rbf' (SVC RBF, lento
+    mas pega não-linearidades).
+
+    Sobre embeddings, modelos lineares puros tendem a sub-aproveitar a
+    geometria do espaço — LinearSVC com escala normalizada costuma render
+    mais que LR direta. Quando o F1 cai versus TF-IDF, geralmente é
+    porque a classe minoritária ficou sub-representada após a projeção:
+    elevamos n_iter, escalamos e calibramos.
+    """
     from sklearn.linear_model import LogisticRegression
+    from sklearn.svm import LinearSVC, SVC
+    from sklearn.calibration import CalibratedClassifierCV
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.pipeline import Pipeline
     from sklearn.model_selection import train_test_split
     from sklearn.metrics import classification_report, f1_score
 
@@ -113,12 +129,38 @@ def treinar_classificador(tipo="sentence-bert", fazer_holdout=True):
     else:
         X_tr, X_te, y_tr, y_te = X, X, y, y
 
-    clf = LogisticRegression(max_iter=2000, class_weight="balanced",
-                              n_jobs=-1, random_state=config.SEED)
+    if modelo_final == "lr":
+        clf = Pipeline([
+            ("escala", StandardScaler(with_mean=False)),
+            ("lr", LogisticRegression(max_iter=3000, C=1.0,
+                                       class_weight="balanced",
+                                       n_jobs=-1, solver="lbfgs",
+                                       random_state=config.SEED)),
+        ])
+    elif modelo_final == "rbf":
+        clf = Pipeline([
+            ("escala", StandardScaler(with_mean=False)),
+            ("svc", CalibratedClassifierCV(
+                SVC(kernel="rbf", class_weight="balanced",
+                    random_state=config.SEED, cache_size=500),
+                cv=2,
+            )),
+        ])
+    else:  # svc (default) — LinearSVC calibrado
+        clf = Pipeline([
+            ("escala", StandardScaler(with_mean=False)),
+            ("svc", CalibratedClassifierCV(
+                LinearSVC(class_weight="balanced",
+                          random_state=config.SEED, max_iter=5000, C=1.0),
+                cv=3,
+            )),
+        ])
+
     clf.fit(X_tr, y_tr)
     pred = clf.predict(X_te)
     metricas = {
         "tipo": tipo,
+        "modelo_final": modelo_final,
         "f1_macro": float(f1_score(y_te, pred, average="macro")),
         "f1_engenharia": float(f1_score(y_te, pred, labels=["engenharia"],
                                         average="macro", zero_division=0)),
@@ -127,15 +169,20 @@ def treinar_classificador(tipo="sentence-bert", fazer_holdout=True):
     }
     salvar_modelo(clf, saida / f"clf_{nome}.joblib")
     salvar_json(metricas, saida / f"metricas_{nome}.json")
-    print(f"[emb] {tipo} F1-eng={metricas['f1_engenharia']:.4f}")
+    print(f"[emb] {tipo} ({modelo_final}) F1-eng={metricas['f1_engenharia']:.4f}, "
+          f"F1-macro={metricas['f1_macro']:.4f}")
     liberar(X, clf)
     return metricas
 
 
 @com_gc
-def executar(tipo="sentence-bert", treinar=True):
-    """Pipeline embeddings: gera + treina classificador."""
+def executar(tipo="sentence-bert", treinar=True, modelo_final="svc"):
+    """Pipeline embeddings: gera + treina classificador.
+
+    modelo_final: 'svc' (default, melhor F1 em embeddings densos),
+    'lr' (mais rápido), 'rbf' (não-linear, lento mas pode ajudar).
+    """
     gerar(tipo=tipo)
     if treinar:
-        return treinar_classificador(tipo=tipo)
+        return treinar_classificador(tipo=tipo, modelo_final=modelo_final)
     return None

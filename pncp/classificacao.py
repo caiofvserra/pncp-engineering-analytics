@@ -126,17 +126,20 @@ def g_distribuicao_probs(modelos, X_te, y_te, pasta):
 
 # ── Treino e métricas ────────────────────────────────────────────────────────
 def _treinar_modelos(X_tr, y_tr, n_estimators_rf=100):
+    # lbfgs converge mais rápido que saga em texto esparso e evita
+    # ConvergenceWarning com max_iter padrão.
     modelos = {
         "lr": LogisticRegression(
-            max_iter=1000, class_weight="balanced", n_jobs=-1,
-            random_state=config.SEED, solver="saga",
+            max_iter=2000, class_weight="balanced", n_jobs=-1,
+            random_state=config.SEED, solver="lbfgs",
         ),
         "rf": RandomForestClassifier(
             n_estimators=n_estimators_rf, class_weight="balanced", n_jobs=-1,
             random_state=config.SEED, max_depth=20,
         ),
         "svc": CalibratedClassifierCV(  # SVC linear + calibração para ter prob
-            LinearSVC(class_weight="balanced", random_state=config.SEED),
+            LinearSVC(class_weight="balanced", random_state=config.SEED,
+                       max_iter=5000),
             cv=2,
         ),
     }
@@ -200,8 +203,8 @@ def _mcnemar(modelo_a, modelo_b, X_te, y_te):
 def _grid_search_lr(X_tr, y_tr):
     """GridSearch enxuto para LR (C). Reduzido para 2 valores × CV2 = 4 fits."""
     grid = GridSearchCV(
-        LogisticRegression(max_iter=1000, class_weight="balanced",
-                           n_jobs=-1, random_state=config.SEED, solver="saga"),
+        LogisticRegression(max_iter=2000, class_weight="balanced",
+                           n_jobs=-1, random_state=config.SEED, solver="lbfgs"),
         param_grid={"C": [0.5, 2.0]},
         scoring="f1_macro",
         cv=2,
@@ -261,8 +264,13 @@ def calibrar(modelo, X_tr, y_tr, metodo="isotonic"):
 
 
 # ── Ranking de suspeitos ─────────────────────────────────────────────────────
-def _gerar_ranking(modelo, X, df_meta):
-    """Para os contratos rotulados 'geral', ordena pela prob de 'engenharia'."""
+def _gerar_ranking(modelo, X, df_meta, deduplicar=True):
+    """Para os contratos rotulados 'geral', ordena pela prob de 'engenharia'.
+
+    deduplicar: se True, agrupa por (objeto_limpo, CNPJ) e mantém só o
+    contrato de maior prob de cada grupo. Evita poluir o top-10 com
+    réplicas exatas do mesmo objeto (ex: 'AR CONDICIONADO' 12 vezes).
+    """
     if not hasattr(modelo, "predict_proba"):
         return pd.DataFrame()
     classes = list(modelo.classes_)
@@ -274,6 +282,19 @@ def _gerar_ranking(modelo, X, df_meta):
     out["prob_engenharia"] = proba.astype("float32")
     suspeitos = (out[out["rotulo"] == "geral"]
                  .sort_values("prob_engenharia", ascending=False))
+
+    if deduplicar and not suspeitos.empty:
+        # Chave de dedup: primeiros 80 chars do objeto + CNPJ extraído do NCP
+        chave_obj = (suspeitos.get("objeto", pd.Series([""] * len(suspeitos)))
+                     .fillna("").astype(str).str.lower().str.slice(0, 80))
+        ncp = suspeitos.get("numeroControlePNCP",
+                              pd.Series([""] * len(suspeitos))) \
+                       .fillna("").astype(str)
+        chave_cnpj = ncp.str.slice(0, 14)
+        suspeitos = suspeitos.assign(_chave_dedup=chave_obj + "|" + chave_cnpj)
+        # Mantém a primeira ocorrência (maior prob, já está ordenado)
+        suspeitos = suspeitos.drop_duplicates("_chave_dedup", keep="first") \
+                              .drop(columns="_chave_dedup")
     return suspeitos
 
 

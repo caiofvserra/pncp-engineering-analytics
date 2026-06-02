@@ -1,9 +1,8 @@
 """
 Pacote PNCP — análise de subenquadramento de contratos de engenharia.
 
-TCC MBA IA & Big Data (ICMC/USP). Identifica contratos rotulados como
-"serviços gerais" (categoriaProcessoId=8) que deveriam ser "engenharia/obras"
-(7 ou 9), violando a Lei 14.133/2021.
+Identifica contratos rotulados como "serviços gerais" (categoriaProcessoId=8)
+que deveriam ser "engenharia/obras" (7 ou 9), violando a Lei 14.133/2021.
 
 Cada subpacote escreve seus artefatos em disco (parquet/json/npz) para que
 o pipeline sobreviva a reinício de kernel no Colab.
@@ -30,9 +29,30 @@ PyMuPDF quando você de fato chama `pncp.embeddings.executar()`.
 """
 
 import importlib
+import warnings
 from pathlib import Path
 
 __version__ = "1.0.0"
+
+
+# ── Supressão de ruído no log ───────────────────────────────────────────────
+# Esses warnings poluem o log sem informação acionável:
+#  - DeprecationWarning de jupyter_client (utcnow): vai ser resolvido pelo
+#    próprio jupyter, não temos como mexer
+#  - FutureWarning do pandas sobre downcasting silencioso: usamos o opt-in
+#    explícito (set_option abaixo) e não precisamos do aviso por linha
+#  - ConvergenceWarning quando ele ocorre em ramos não-default
+warnings.filterwarnings("ignore", category=DeprecationWarning,
+                          module=r"jupyter_client.*")
+warnings.filterwarnings("ignore", category=DeprecationWarning,
+                          message=r".*utcnow.*")
+warnings.filterwarnings("ignore", category=FutureWarning,
+                          message=r".*Downcasting.*")
+try:
+    import pandas as _pd
+    _pd.set_option("future.no_silent_downcasting", True)
+except Exception:
+    pass
 
 _LAZY = {
     "config", "io_disco", "ram",
