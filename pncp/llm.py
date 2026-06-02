@@ -1,12 +1,18 @@
 """
 Validação semântica de suspeitos via LLM.
 
-Roda Llama 3.1 local via Ollama — gratuito, privado, não depende de API paga.
+Suporta dois backends, escolhidos com `pncp.llm.configurar(...)`:
+  - "ollama" (padrão): Llama 3.1 local — gratuito, privado, exige GPU/CPU.
+  - "gemini": Google Gemini na nuvem — não exige GPU, precisa de API key.
 
-Uso típico:
+Uso típico (local):
     pncp.llm.iniciar_ollama()              # 1x por sessão
     pncp.llm.pull_modelo('llama3.1')       # 1x por sessão
     pncp.llm.validar_suspeitos(top_n=20)   # analisa os 20 mais suspeitos
+
+Uso típico (nuvem, sem GPU):
+    pncp.llm.configurar(backend='gemini')  # lê GOOGLE_API_KEY do ambiente
+    pncp.llm.validar_suspeitos(top_n=20)
 
 A LLM recebe objeto + sinais detectados pelo pipeline + texto-trecho do
 PDF (se houver) e dá veredicto estruturado em JSON: classe predita,
@@ -77,7 +83,97 @@ def pull_modelo(modelo="llama3.1"):
         return False
 
 
-# ── Chamada ao LLM ──────────────────────────────────────────────────────────
+# ── Backend de LLM (Ollama local ou Gemini na nuvem) ────────────────────────
+# Estado global do backend. Trocar com pncp.llm.configurar(...).
+BACKEND = "ollama"               # "ollama" | "gemini"
+MODELO_OLLAMA = "llama3.1"
+MODELO_GEMINI = "gemini-1.5-flash"
+_GEMINI_CONFIGURADO = False
+
+
+def configurar(backend="ollama", modelo=None, api_key=None):
+    """
+    Define qual backend de LLM as funções deste módulo usam.
+
+    Args:
+      backend: "ollama" (local) ou "gemini" (nuvem).
+      modelo: nome do modelo padrão para esse backend (opcional).
+      api_key: chave da API Gemini. Se None, tenta env GOOGLE_API_KEY e,
+               em Colab, userdata.get('GOOGLE_API_KEY').
+
+    Exemplos:
+        pncp.llm.configurar(backend="gemini")
+        pncp.llm.configurar(backend="ollama", modelo="llama3.1")
+    """
+    global BACKEND, MODELO_OLLAMA, MODELO_GEMINI, _GEMINI_CONFIGURADO
+    BACKEND = backend
+    if backend == "gemini":
+        if modelo:
+            MODELO_GEMINI = modelo
+        _GEMINI_CONFIGURADO = _config_gemini(api_key)
+        print(f"[llm] backend=gemini modelo={MODELO_GEMINI} "
+              f"{'(ok)' if _GEMINI_CONFIGURADO else '(SEM API key)'}")
+    else:
+        if modelo:
+            MODELO_OLLAMA = modelo
+        print(f"[llm] backend=ollama modelo={MODELO_OLLAMA}")
+
+
+def _obter_api_key_gemini(api_key=None):
+    """Resolve a API key: argumento → env → userdata do Colab."""
+    if api_key:
+        return api_key
+    import os
+    if os.environ.get("GOOGLE_API_KEY"):
+        return os.environ["GOOGLE_API_KEY"]
+    try:
+        from google.colab import userdata
+        return userdata.get("GOOGLE_API_KEY")
+    except Exception:
+        return None
+
+
+def _config_gemini(api_key=None):
+    """Configura o cliente google.generativeai. Retorna True se ok."""
+    try:
+        import google.generativeai as genai
+    except ImportError:
+        print("[llm] instale: pip install google-generativeai")
+        return False
+    chave = _obter_api_key_gemini(api_key)
+    if not chave:
+        print("[llm] GOOGLE_API_KEY não encontrada (passe api_key=..., "
+              "defina o env, ou adicione nos Secrets do Colab)")
+        return False
+    genai.configure(api_key=chave)
+    return True
+
+
+def _modelo_efetivo(modelo):
+    """Resolve o nome do modelo conforme o backend ativo.
+
+    Permite que os callers passem o default "llama3.1" e ainda assim
+    funcionem quando o backend é Gemini (e vice-versa).
+    """
+    if BACKEND == "gemini":
+        if not modelo or modelo == "llama3.1" or modelo.startswith(
+                ("llama", "mistral", "qwen", "gemma", "phi")):
+            return MODELO_GEMINI
+        return modelo
+    if not modelo or modelo.startswith("gemini"):
+        return MODELO_OLLAMA
+    return modelo
+
+
+# ── Chamada ao LLM (dispatcher) ─────────────────────────────────────────────
+def _chat(modelo, system, prompt, max_tokens=500, temperatura=0.2):
+    """Roteia para o backend ativo (ollama ou gemini)."""
+    m = _modelo_efetivo(modelo)
+    if BACKEND == "gemini":
+        return _chat_gemini(m, system, prompt, max_tokens, temperatura)
+    return _chat_ollama(m, system, prompt, max_tokens, temperatura)
+
+
 def _chat_ollama(modelo, system, prompt, max_tokens=500, temperatura=0.2):
     """Wrapper para a API do Ollama (compatível com formato OpenAI)."""
     import requests
@@ -103,6 +199,33 @@ def _chat_ollama(modelo, system, prompt, max_tokens=500, temperatura=0.2):
         return r.json().get("message", {}).get("content", "").strip()
     except Exception as e:
         print(f"[llm] erro: {e}")
+        return None
+
+
+def _chat_gemini(modelo, system, prompt, max_tokens=500, temperatura=0.2):
+    """Wrapper para a API do Google Gemini."""
+    try:
+        import google.generativeai as genai
+    except ImportError:
+        print("[llm] instale: pip install google-generativeai")
+        return None
+    global _GEMINI_CONFIGURADO
+    if not _GEMINI_CONFIGURADO:
+        _GEMINI_CONFIGURADO = _config_gemini()
+        if not _GEMINI_CONFIGURADO:
+            return None
+    try:
+        gm = genai.GenerativeModel(
+            model_name=modelo,
+            generation_config={
+                "temperature": temperatura,
+                "max_output_tokens": max_tokens,
+            },
+        )
+        resp = gm.generate_content([system, prompt])
+        return (resp.text or "").strip()
+    except Exception as e:
+        print(f"[llm] erro gemini: {e}")
         return None
 
 
@@ -201,9 +324,16 @@ def validar_suspeitos(top_n=20, modelo="llama3.1", forcar=False):
     """
     Pega os top-N suspeitos consolidados, manda para o LLM, salva resultados.
 
+    O backend (ollama/gemini) é o definido por pncp.llm.configurar(). O
+    `modelo` é resolvido conforme o backend ativo — passar o default
+    "llama3.1" funciona mesmo com backend Gemini.
+
+    Depois de rodar isto, chame pncp.relatorio.gerar() de novo para que o
+    veredito do LLM entre como sinal na consolidação.
+
     Args:
       top_n: quantos contratos analisar (LLM local: ~5s/contrato)
-      modelo: nome do modelo Ollama (precisa ter feito pull_modelo() antes)
+      modelo: nome do modelo (resolvido pelo backend ativo)
       forcar: se True, re-analisa mesmo se já tem resultado
 
     Returns:
@@ -227,7 +357,7 @@ def validar_suspeitos(top_n=20, modelo="llama3.1", forcar=False):
     resultados = []
     for i, row in df.reset_index(drop=True).iterrows():
         prompt = _montar_prompt(row.to_dict())
-        resp_txt = _chat_ollama(modelo, SYSTEM_PROMPT, prompt)
+        resp_txt = _chat(modelo, SYSTEM_PROMPT, prompt)
         resp = _parse_resposta(resp_txt) or {}
 
         resultados.append({
@@ -259,7 +389,8 @@ def validar_suspeitos(top_n=20, modelo="llama3.1", forcar=False):
             "distribuicao_llm": cont,
             "n_subenquadramentos_apontados": n_subenq,
             "n_exigem_art_rrt": n_rito,
-            "modelo": modelo,
+            "backend": BACKEND,
+            "modelo": _modelo_efetivo(modelo),
         }, config.caminho("llm", "resumo.json"))
         print(f"\n[llm] resultado: {cont}")
         print(f"   subenquadramentos apontados pelo LLM: {n_subenq}/{len(out)}")
@@ -330,9 +461,9 @@ def extrair_entidades_llm(top_n=30, modelo="llama3.1", forcar=False):
     resultados = []
     for i, row in df.reset_index(drop=True).iterrows():
         objeto = str(row.get("objeto", ""))[:600]
-        resp_txt = _chat_ollama(modelo, SYSTEM_NER,
-                                 f"Objeto:\n{objeto}\n\nExtraia.",
-                                 max_tokens=400)
+        resp_txt = _chat(modelo, SYSTEM_NER,
+                          f"Objeto:\n{objeto}\n\nExtraia.",
+                          max_tokens=400)
         resp = _parse_resposta(resp_txt) or {}
         resultados.append({
             "numeroControlePNCP": row.get("numeroControlePNCP"),
@@ -377,7 +508,7 @@ def resumir_objetos(amostra=20, modelo="llama3.1"):
         if len(obj) < 50:
             saida.append(obj)
             continue
-        resumo = _chat_ollama(modelo, SYSTEM_RESUMO, obj, max_tokens=80) or obj
+        resumo = _chat(modelo, SYSTEM_RESUMO, obj, max_tokens=80) or obj
         saida.append(resumo.strip())
     df = df.copy()
     df["resumo_llm"] = saida
@@ -445,7 +576,7 @@ def gerar_indicadores(top_n_clusters=10, n_por_cluster=5,
         prompt = (f"Cluster #{cid} ({tam} contratos similares).\n\n"
                   f"Amostra de objetos:\n{objetos}\n\n"
                   f"Gere o indicador no JSON.")
-        resp = _chat_ollama(modelo, SYSTEM_INDICADOR, prompt, max_tokens=600)
+        resp = _chat(modelo, SYSTEM_INDICADOR, prompt, max_tokens=600)
         parsed = _parse_resposta(resp) or {}
         parsed["cluster_id"] = int(cid)
         parsed["tamanho_cluster"] = tam
@@ -548,7 +679,7 @@ def agente(pergunta, modelo="llama3.1", max_passos=4):
     """
     contexto = f"Pergunta do usuário: {pergunta}"
     for passo in range(max_passos):
-        resp = _chat_ollama(modelo, SYSTEM_AGENTE, contexto, max_tokens=500)
+        resp = _chat(modelo, SYSTEM_AGENTE, contexto, max_tokens=500)
         parsed = _parse_resposta(resp) or {}
         acao = parsed.get("acao")
         if acao == "responder":

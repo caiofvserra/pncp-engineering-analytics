@@ -83,6 +83,24 @@ def consolidar():
         ids = set(fortes["numeroControlePNCP"].astype(str))
         base["tem_cnae_eng"] = base["numeroControlePNCP"].astype(str).isin(ids)
 
+    # LLM — veredito semântico (se pncp.llm.validar_suspeitos() já rodou).
+    # O LLM lê os suspeitos consolidados de uma rodada anterior; por isso
+    # este sinal só aparece a partir da 2ª chamada de consolidar(). Fluxo:
+    #   consolidar() → llm.validar_suspeitos() → consolidar() (pega o LLM).
+    llm = _ler_se_existe(config.caminho("llm", "validacao_llm.parquet"))
+    if (llm is not None and "numeroControlePNCP" in llm.columns
+            and "llm_classe" in llm.columns):
+        cols_llm = ["numeroControlePNCP", "llm_classe"]
+        if "llm_confianca" in llm.columns:
+            cols_llm.append("llm_confianca")
+        base = base.merge(llm[cols_llm], on="numeroControlePNCP", how="left")
+        conf = (base["llm_confianca"].fillna(0)
+                if "llm_confianca" in base.columns else 1.0)
+        # Sinal: LLM apontou engenharia/obras com confiança >= 0.6
+        base["llm_aponta_subenq"] = (
+            base["llm_classe"].isin(["engenharia", "obras"]) & (conf >= 0.6)
+        )
+
     # Conta sinais
     sinais = []
     if "prob_engenharia" in base.columns:
@@ -93,6 +111,8 @@ def consolidar():
         sinais.append(base["tem_mudanca_escopo"].fillna(False).astype(int))
     if "tem_cnae_eng" in base.columns:
         sinais.append(base["tem_cnae_eng"].fillna(False).astype(int))
+    if "llm_aponta_subenq" in base.columns:
+        sinais.append(base["llm_aponta_subenq"].fillna(False).astype(int))
     base["n_sinais"] = sum(sinais) if sinais else 0
 
     suspeitos = (base[base["rotulo"] == "geral"]
@@ -167,6 +187,8 @@ def gerar_markdown():
                             eh_json=True) or {}
     pdfs = _ler_se_existe(config.caminho(config.SUB_C2, "resumo.json"),
                             eh_json=True) or {}
+    llm = _ler_se_existe(config.caminho("llm", "resumo.json"),
+                          eh_json=True) or {}
 
     melhor = metricas.get("melhor_modelo", "lr")
     f1_eng = (metricas.get("holdout", {}).get(melhor, {})
@@ -239,6 +261,22 @@ def gerar_markdown():
                     f"- Com CNAE de engenharia: {cnae.get('n_com_cnae_eng', 0)}",
                     f"- **Suspeitos fortes** (geral + CNAE eng): "
                     f"{cnae.get('n_suspeitos_fortes', 0)}"]
+
+    if llm:
+        dist = llm.get("distribuicao_llm", {})
+        dist_txt = ", ".join(f"{k}={v}" for k, v in dist.items()) or "—"
+        linhas += ["", _secao("Validação semântica por LLM"),
+                    f"- Backend: **{llm.get('backend', '?')}** "
+                    f"(modelo {llm.get('modelo', '?')})",
+                    f"- Contratos avaliados: {llm.get('n_avaliados', 0)}",
+                    f"- Classificação do LLM: {dist_txt}",
+                    f"- **Subenquadramentos apontados** (engenharia/obras): "
+                    f"{llm.get('n_subenquadramentos_apontados', 0)}",
+                    f"- Exigem ART/RRT segundo o LLM: "
+                    f"{llm.get('n_exigem_art_rrt', 0)}",
+                    "",
+                    "O veredito do LLM entra como mais um sinal na consolidação "
+                    "(conta junto com prob ML, marcadores em PDF, CNAE e aditivos)."]
 
     if grafos:
         linhas += ["", _secao("Análise de grafos"),
