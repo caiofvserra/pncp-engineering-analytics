@@ -3,13 +3,16 @@ Marcadores legais e técnicos de engenharia em PDFs do PNCP.
 
 Por que isso vale: a Lei 6.496/1977 obriga ART para qualquer atividade
 de engenharia, mesmo quando o contrato é rotulado como serviço comum.
-Contratos rotulados 'geral' que mencionam ART/RRT/CREA no TR ou edital
+Contratos rotulados 'geral' que mencionam ART/CREA no TR ou edital
 são candidatos prioritários a subenquadramento.
 
-Os marcadores estão em 9 categorias (sigla, lei correspondente):
-  ART (Lei 6.496/1977), RRT (Lei 12.378/2010), CREA, CAU,
-  ENGENHEIRO_RESPONSAVEL, ATC (atestado capacidade técnica),
-  PROJETO_BASICO, OBRA_SERVICO_ENGENHARIA, ABNT_NORMAS,
+Escopo: apenas ENGENHARIA (CREA/ART) e OBRAS. Arquitetura (CAU/RRT) NÃO
+entra na análise.
+
+Os marcadores estão em 8 categorias (sigla, lei correspondente):
+  ART (Lei 6.496/1977), CREA, ENGENHEIRO_RESPONSAVEL,
+  ATC (atestado capacidade técnica), PROJETO_BASICO,
+  OBRA_SERVICO_ENGENHARIA, ABNT_NORMAS,
   LEI_14133_ENGENHARIA (art. 6º XII e XX/XXI).
 
 `detectar_marcadores(texto)` retorna dict com contagens, presença binária
@@ -62,19 +65,10 @@ MARCADORES_ENGENHARIA = {
         r"\banota[çc][ãa]o\s+de\s+responsabilidade\s+t[ée]cnica\b",
         r"\bART\b(?:\s+do\s+CREA)?",
     ],
-    # Lei 12.378/2010 — equivalente da ART para arquitetos
-    "RRT": [
-        r"\bregistro\s+de\s+responsabilidade\s+t[ée]cnica\b",
-        r"\bRRT\b(?:\s+do\s+CAU)?",
-    ],
     "CREA": [
         r"\bCREA[/\s\-]?\w{0,2}\b",
         r"\bConselho\s+Regional\s+de\s+Engenharia\b",
         r"\bregistro\s+(?:no\s+)?CREA\b",
-    ],
-    "CAU": [
-        r"\bCAU[/\s\-]?\w{0,2}\b",
-        r"\bConselho\s+de\s+Arquitetura\s+e\s+Urbanismo\b",
     ],
     "ENGENHEIRO_RESPONSAVEL": [
         r"\bengenheiro\s+respons[áa]vel\b",

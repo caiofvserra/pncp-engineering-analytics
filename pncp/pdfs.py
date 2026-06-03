@@ -6,7 +6,7 @@ Pipeline:
   2. Filtra apenas tipos relevantes (TR, Projeto Básico, ETP, Edital, ...)
   3. Baixa em cache local; usa de novo se já existe
   4. Extrai texto (PyMuPDF → pdfplumber → OCR como fallbacks)
-  5. Normaliza (de-hifeniza) e detecta marcadores legais (ART, RRT, CREA…)
+  5. Normaliza (de-hifeniza) e detecta marcadores legais (ART, CREA…)
   6. Agrega por contrato e produz score 0-9 de engenharia
 
 Output: dados/pdfs/features_pdfs.parquet com 1 linha por contrato.

@@ -254,7 +254,7 @@ def g_por_esfera(df, pasta):
 def g_marcadores_por_rotulo(pasta):
     """
     Insight central do TCC: % de contratos COM cada categoria de marcador
-    (ART/RRT/CREA/…) por rótulo. Esperamos:
+    (ART/CREA/…) por rótulo. Esperamos:
       - obras/engenharia: 50-80% têm marcadores
       - geral: idealmente 0%, na prática alguns % = subenquadramento
     """
@@ -269,12 +269,10 @@ def g_marcadores_por_rotulo(pasta):
     cols_pres = [c for c in df_u.columns if c.endswith("_presente")]
     if not cols_pres or df_u.empty:
         return None
-    # Nomes legíveis para o gráfico (sem ficar só "ART" "RRT" sem contexto)
+    # Nomes legíveis para o gráfico (sem ficar só "ART" "CREA" sem contexto)
     rotulos_legiveis = {
         "ART": "ART (Anotação Resp. Técnica)",
-        "RRT": "RRT (Registro Resp. Técnica)",
         "CREA": "CREA",
-        "CAU": "CAU",
         "ENGENHEIRO_RESPONSAVEL": "Engenheiro Responsável",
         "ATESTADO_CAP_TECNICA": "Atestado Cap. Técnica",
         "PROJETO_BASICO": "Projeto Básico/Executivo",
