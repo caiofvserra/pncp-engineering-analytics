@@ -100,6 +100,13 @@ def _aplanar(r):
     tipo = r.get("tipoContrato") or {}
     return {
         "numeroControlePNCP":        r.get("numeroControlePNCP", ""),
+        # Referência à CONTRATAÇÃO (compra) de origem — onde ficam o TR /
+        # Projeto Básico / Edital. Essencial para a análise de rito: o
+        # contrato (dígito 2) não expõe esses documentos; a compra (dígito 1)
+        # sim, via /v1/orgaos/{cnpj}/compras/{ano}/{seq}/arquivos.
+        "numeroControlePNCPCompra":  r.get("numeroControlePNCPCompra", ""),
+        "sequencialCompra":          r.get("sequencialCompra"),
+        "anoCompra":                 r.get("anoCompra"),
         "categoriaProcessoId":       cat.get("id"),
         "categoriaProcessoNome":     cat.get("nome", ""),
         "objetoContrato":            r.get("objetoContrato", ""),
