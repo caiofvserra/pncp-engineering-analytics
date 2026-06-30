@@ -4,56 +4,46 @@ flowchart LR
   classDef model  fill:#fde3cc,stroke:#c8702a,color:#5a330f;
   classDef detec  fill:#e7f0d9,stroke:#5a8a2c,color:#2d4a12;
   classDef rito   fill:#f6dcdc,stroke:#b03030,color:#5a1212;
-  classDef nota   fill:#fff6da,stroke:#c9a227,color:#5a4a10,stroke-dasharray:4 3;
   classDef saida  fill:#ece5f6,stroke:#6a4ca0,color:#33215c;
 
   subgraph S1["1 · COLETA E DEFINIÇÃO DO ESCOPO"]
     direction TB
-    A1["Coleta de dados (JSON) do PNCP via API oficial"]:::coleta
-    A2["Estatística descritiva:<br/>modalidade, tipo, esfera, região"]:::coleta
-    A3["Filtragem: período, esfera, órgãos,<br/>modalidade, categoria do item"]:::coleta
+    A1["<b>Coleta de dados (JSON) do PNCP</b><br/><i>API pública oficial · Lei 14.133/2021</i>"]:::coleta
+    A2["<b>Estatística descritiva</b><br/><i>modalidade, tipo, esfera, região</i>"]:::coleta
+    A3["<b>Filtragem inicial</b><br/><i>período, esfera, órgãos, modalidade,<br/>categoria do item · rótulos: engenharia,<br/>obras, serviços gerais (cat. 8)</i>"]:::coleta
     A1 --> A2 --> A3
-    NA["<b>Fonte e escopo</b><br/>• API pública PNCP (Lei 14.133/2021)<br/>• Rótulos: engenharia, obras, serviços gerais (cat. 8)<br/>• Recorte: período + UF/esfera definidos<br/>• Docs (TR/Edital) só p/ suspeitos → custo"]:::nota
-    A3 -.-> NA
   end
 
   subgraph S2["2 · MODELAGEM PU (Positive-Unlabeled)"]
     direction TB
-    B0["Positivos confiáveis = engenharia + obras<br/>Ruidoso = serviços gerais (categoria 8)"]:::model
-    B1["Pré-tratamento + limpeza de boilerplate"]:::model
-    B2["Embeddings semânticos SBERT (multilíngue)"]:::model
-    B3["Filtro por similaridade ao centróide eng+obras<br/>→ candidatos vs negativos confiáveis"]:::model
-    B4["Clusterização auto-k (KMeans, silhouette)<br/>+ descritores TF-IDF por cluster"]:::model
-    B5["Revisão de clusters assistida por LLM"]:::model
-    B6["Treino de classificadores supervisionados<br/>LogReg, RF, ExtraTrees, GB, SVM, kNN, MLP, NB"]:::model
+    B0["<b>Rotulagem PU</b><br/><i>positivos confiáveis = engenharia + obras<br/>ruidoso = serviços gerais · base ~93% 'geral'<br/>(só o positivo é confiável)</i>"]:::model
+    B1["<b>Pré-tratamento + limpeza de boilerplate</b><br/><i>remove prefixos burocráticos p/ não<br/>inflar a similaridade</i>"]:::model
+    B2["<b>Embeddings semânticos SBERT</b><br/><i>distiluse-base-multilingual · normalização L2</i>"]:::model
+    B3["<b>Filtro por similaridade ao centróide eng+obras</b><br/><i>separa candidatos × negativos confiáveis</i>"]:::model
+    B4["<b>Clusterização auto-k (KMeans)</b><br/><i>k 6–12 pelo melhor silhouette (cosseno)<br/>descritores TF-IDF + stemmer RSLP</i>"]:::model
+    B5["<b>Revisão de clusters assistida por LLM</b>"]:::model
+    B6["<b>Treino de classificadores supervisionados</b><br/><i>LogReg, RF, ExtraTrees, GB, SVM, kNN, MLP, NB<br/>melhor modelo por F1 macro (holdout)</i>"]:::model
     B0 --> B1 --> B2 --> B3 --> B4 --> B5 --> B6
-    NB["<b>Por que PU Learning</b><br/>• Base ~93% 'geral': rótulo positivo é confiável,<br/>  negativo não existe → usa só positivos + não-rotulados<br/><b>Parâmetros</b><br/>• SBERT distiluse-base-multilingual (norm. L2)<br/>• Boilerplate removido p/ não inflar similaridade<br/>• k automático 6–12 (melhor silhouette, cosseno)<br/>• Seleção do melhor modelo por F1 macro (holdout)<br/>• TF-IDF + RSLP só como descritor de cluster"]:::nota
-    B6 -.-> NB
   end
 
   subgraph S3["3 · DETECÇÃO DE SUBENQUADRAMENTO"]
     direction TB
-    C1["Pontua TODOS os 'serviços gerais'<br/>→ prob. de ser engenharia"]:::detec
-    C2["Ranking de suspeitos + corte por limiar<br/>(curva precisão/recall)"]:::detec
-    C3["Validação manual (~80 contratos)<br/>→ precisão / recall / F1"]:::detec
-    C4["Veredito LLM nos suspeitos do topo"]:::detec
-    C5["Visualização: UMAP 2D + rede de similaridade k-NN"]:::detec
+    C1["<b>Pontua TODOS os 'serviços gerais'</b><br/><i>predict_proba → prob. de ser engenharia</i>"]:::detec
+    C2["<b>Ranking de suspeitos + corte por limiar</b><br/><i>limiar vindo da validação (máx. F1), não fixo</i>"]:::detec
+    C3["<b>Validação manual (~80 contratos, estratificada)</b><br/><i>precisão / recall / F1 honestos</i>"]:::detec
+    C4["<b>Veredito LLM nos suspeitos do topo</b><br/><i>cruzamento ML × LLM reduz falso positivo</i>"]:::detec
+    C5["<b>Visualização: UMAP 2D + rede k-NN + curva de limiar</b><br/><i>suspeitos colados aos eng confirmados</i>"]:::detec
     C1 --> C2 --> C3 --> C4 --> C5
-    NC["<b>Rigor e leitura</b><br/>• Limiar escolhido na validação (máx. F1), não fixo<br/>• Validação manual estratificada = métrica honesta<br/>• Cruzamento ML × LLM reduz falso positivo<br/>• UMAP/k-NN: suspeitos colados aos eng confirmados<br/>• Curva de limiar mostra trade-off precisão×recall"]:::nota
-    C5 -.-> NC
   end
 
   subgraph S4["4 · ANÁLISE DE RITO (evidência definitiva)"]
     direction TB
-    D1["Baixa documentos SÓ dos suspeitos:<br/>Termo de Referência / Projeto Básico / Edital"]:::rito
-    D2["Marcadores legais: CREA / ART, projeto básico,<br/>ABNT, Lei 14.133/2021 (SEM CAU/RRT)"]:::rito
-    D3["Veredito por contrato:<br/>subenquadramento real × rótulo errado, processo ok<br/>× indeterminado"]:::rito
+    D1["<b>Baixa documentos dos suspeitos</b><br/><i>resolve contrato → compra (numeroControlePNCP)<br/>endpoint /compras/{ano}/{seq}/arquivos<br/>TR / Projeto Básico / Edital</i>"]:::rito
+    D2["<b>Detecta marcadores legais no TR</b><br/><i>CREA/ART, projeto básico, ABNT, Lei 14.133/2021<br/>extração PyMuPDF + regex · SEM CAU/RRT</i>"]:::rito
+    D3["<b>Veredito por contrato</b><br/><i>subenquadramento real × rótulo errado, processo ok<br/>× indeterminado · base: Lei 5.194/66 + CONFEA</i>"]:::rito
     D1 --> D2 --> D3
-    ND["<b>Como se confirma o rito</b><br/>• Resolve contrato → compra (numeroControlePNCP)<br/>• Endpoint /compras/{ano}/{seq}/arquivos<br/>• Extrai texto (PyMuPDF) + regex de marcadores<br/>• Veredito LLM sobre o trecho do TR<br/>• Atividade de engenharia: Lei 5.194/66 + CONFEA<br/>• Arquitetura (CAU/RRT) fora do escopo"]:::nota
-    D3 -.-> ND
   end
 
-  OUT["<b>Artefatos gerados</b> &nbsp;|&nbsp; modelo_final.joblib &nbsp;•&nbsp; 07_ranking_suspeitos.csv &nbsp;•&nbsp; 08_validacao.csv<br/>11_analise_rito.csv &nbsp;•&nbsp; figuras (clusters, UMAP, grafo k-NN, curva de limiar) &nbsp;•&nbsp; relatorio_vivo.md"]:::saida
+  OUT["<b>Artefatos gerados</b><br/>modelo_final.joblib · 07_ranking_suspeitos.csv · 08_validacao.csv<br/>11_analise_rito.csv · figuras (clusters, UMAP, grafo k-NN, curva de limiar)<br/>relatorio_vivo.md"]:::saida
 
-  S1 --> S2 --> S3 --> S4
-  S4 --> OUT
+  S1 --> S2 --> S3 --> S4 --> OUT
