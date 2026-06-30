@@ -1,0 +1,46 @@
+%%{init: {'theme':'base','themeVariables':{'fontSize':'14px'}}}%%
+flowchart TB
+  classDef coleta fill:#dbe7f3,stroke:#2c5f8a,color:#11314d;
+  classDef model  fill:#fde3cc,stroke:#c8702a,color:#5a330f;
+  classDef detec  fill:#e7f0d9,stroke:#5a8a2c,color:#2d4a12;
+  classDef rito   fill:#f6dcdc,stroke:#b03030,color:#5a1212;
+
+  subgraph S1["1 · COLETA E DEFINIÇÃO DO ESCOPO"]
+    direction TB
+    A1["Coleta de dados (JSON) do PNCP via API oficial"]:::coleta
+    A2["Estatística descritiva: modalidade, tipo, esfera, região"]:::coleta
+    A3["Filtragem: período, esfera, órgãos, modalidade, categoria do item"]:::coleta
+    A1 --> A2 --> A3
+  end
+
+  subgraph S2["2 · MODELAGEM PU (Positive-Unlabeled)"]
+    direction TB
+    B0["Positivos confiáveis = engenharia + obras<br/>Ruidoso = serviços gerais (categoria 8)"]:::model
+    B1["Pré-tratamento + limpeza de boilerplate"]:::model
+    B2["Embeddings semânticos SBERT (multilíngue)"]:::model
+    B3["Filtro por similaridade ao centróide eng+obras<br/>→ candidatos vs negativos confiáveis"]:::model
+    B4["Clusterização auto-k (KMeans, silhouette)<br/>+ descritores TF-IDF por cluster"]:::model
+    B5["Revisão de clusters assistida por LLM"]:::model
+    B6["Treino de classificadores supervisionados<br/>LogReg, RF, ExtraTrees, GB, SVM, kNN, MLP, NB"]:::model
+    B0 --> B1 --> B2 --> B3 --> B4 --> B5 --> B6
+  end
+
+  subgraph S3["3 · DETECÇÃO DE SUBENQUADRAMENTO"]
+    direction TB
+    C1["Pontua TODOS os 'serviços gerais' → prob. de ser engenharia"]:::detec
+    C2["Ranking de suspeitos + corte por limiar (curva precisão/recall)"]:::detec
+    C3["Validação manual (~80 contratos) → precisão / recall / F1"]:::detec
+    C4["Veredito LLM nos suspeitos do topo"]:::detec
+    C5["Visualização: UMAP 2D + rede de similaridade k-NN"]:::detec
+    C1 --> C2 --> C3 --> C4 --> C5
+  end
+
+  subgraph S4["4 · ANÁLISE DE RITO (evidência definitiva)"]
+    direction TB
+    D1["Baixa documentos SÓ dos suspeitos:<br/>Termo de Referência / Projeto Básico / Edital"]:::rito
+    D2["Marcadores legais: CREA / ART, projeto básico, ABNT,<br/>Lei 14.133/2021 (SEM CAU/RRT — arquitetura fora)"]:::rito
+    D3["Veredito por contrato:<br/>subenquadramento real × rótulo errado, processo ok × indeterminado"]:::rito
+    D1 --> D2 --> D3
+  end
+
+  S1 --> S2 --> S3 --> S4
