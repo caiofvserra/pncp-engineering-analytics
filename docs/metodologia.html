@@ -1,128 +1,69 @@
 <!doctype html><html lang="pt-br"><head><meta charset="utf-8"><style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:"Segoe UI",-apple-system,"Helvetica Neue",Arial,sans-serif;background:#fff;color:#1f2933;padding:44px 40px 46px;width:2380px}
-h1{font-size:30px;font-weight:800;color:#12303f}
-.sub{font-size:15px;color:#5b6b78;margin:8px 0 14px} .sub b{color:#12303f}
-.leg{display:flex;gap:26px;align-items:center;font-size:13.5px;color:#54636e;margin-bottom:26px;flex-wrap:wrap}
-.leg .k{display:inline-flex;align-items:center;gap:8px}
-.sw{width:34px;height:20px;border-radius:6px;display:inline-block}
-.sw.in{background:#f7f9fb;border:1.6px dashed #9aa7b1}
-.sw.out{background:#fdf3ec;border:1.6px solid #c8702a}
-.sw.ar{width:26px;height:0;border-top:3px solid #c3ccd4;position:relative}
+body{font-family:"Segoe UI",-apple-system,"Helvetica Neue",Arial,sans-serif;background:#fff;color:#1f2933;padding:46px 42px 40px;width:2360px}
+h1{font-size:32px;font-weight:800;color:#12303f}
+.sub{font-size:16px;color:#5b6b78;margin:10px 0 30px} .sub b{color:#12303f}
 .board{display:flex;align-items:stretch}
-.phase{display:flex;flex-direction:column;width:520px}
-.phead{color:#fff;font-weight:800;font-size:15px;letter-spacing:.5px;padding:11px 16px;border-radius:12px 12px 0 0;text-align:center}
-.pbody{flex:1;border-radius:0 0 14px 14px;padding:18px 16px 20px;display:flex;flex-direction:column}
-.card{background:#fff;border-radius:12px;padding:13px 16px;box-shadow:0 3px 10px rgba(20,40,60,.09);border:1px solid #eef1f4}
-.inrow{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
-.cin{font-size:12px;color:#5b6b78;background:#f7f9fb;border:1.4px dashed #a8b4bd;padding:3px 9px;border-radius:999px}
-.chead{display:flex;align-items:center;gap:10px;margin-bottom:6px}
-.badge{color:#fff;font-weight:800;font-size:14px;min-width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;padding:0 6px}
-.ctitle{font-size:16.5px;font-weight:700;color:#16232e;line-height:1.15}
-.cdesc{font-size:13.6px;color:#46545f;line-height:1.4;margin:2px 2px 11px}
-.outrow{display:flex;flex-wrap:wrap;gap:6px}
-.pill{font-family:"Consolas","SF Mono",monospace;font-size:11.6px;color:#2b3a45;border:1.5px solid #ccc;padding:3px 9px;border-radius:8px;white-space:nowrap}
-.vconn{display:flex;flex-direction:column;align-items:center;margin:6px 0}
-.vlabel{background:#fff;border:1px solid #d5dde3;color:#4a5a66;font-size:12px;font-style:italic;padding:2px 10px;border-radius:999px}
-.varr{color:#9aa7b1;font-size:20px;line-height:1}
-.hconn{display:flex;flex-direction:column;align-items:center;justify-content:center;width:120px;position:relative}
+.phase{display:flex;flex-direction:column;width:524px}
+.phead{color:#fff;font-weight:800;font-size:16px;letter-spacing:.4px;padding:12px 16px;border-radius:12px 12px 0 0;text-align:center}
+.pbody{flex:1;border-radius:0 0 14px 14px;padding:20px 18px 22px;display:flex;flex-direction:column;justify-content:flex-start}
+.card{background:#fff;border-radius:12px;padding:15px 17px;box-shadow:0 3px 10px rgba(20,40,60,.10);border:1px solid #eef1f4;margin:0}
+.chead{display:flex;align-items:center;gap:11px;margin-bottom:8px}
+.badge{color:#fff;font-weight:800;font-size:15px;min-width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.ctitle{font-size:17.5px;font-weight:700;color:#16232e;line-height:1.15}
+.cdesc{font-size:14.5px;color:#40505b;line-height:1.46}
+.vconn{text-align:center;margin:8px 0} .varr{color:#9aa7b1;font-size:22px}
+.hconn{display:flex;flex-direction:column;align-items:center;justify-content:center;width:118px;position:relative}
 .arrowline{position:absolute;top:50%;left:6px;right:6px;height:3px;background:#c3ccd4;border-radius:2px}
-.hlabel{position:relative;background:#fff;border:1px solid #d5dde3;color:#3f4f5b;font-size:12.5px;font-weight:600;padding:3px 10px;border-radius:999px;margin-bottom:6px;z-index:2}
-.chev{position:relative;color:#8a97a1;font-size:40px;line-height:.6;z-index:2;background:#fff;padding:0 2px}
-.foot{margin-top:24px;font-size:13px;color:#7a8893} .foot b{color:#3a4a55}
+.hlabel{position:relative;background:#fff;border:1px solid #d5dde3;color:#3f4f5b;font-size:12.5px;font-weight:600;font-style:italic;padding:3px 11px;border-radius:999px;margin-bottom:6px;z-index:2;text-align:center}
+.chev{position:relative;color:#8a97a1;font-size:42px;line-height:.6;z-index:2;background:#fff;padding:0 2px}
+.foot{margin-top:28px;font-size:13.5px;color:#7a8893} .foot b{color:#3a4a55}
 </style></head><body>
 <h1>Metodologia — Identificação de subenquadramento de engenharia no PNCP</h1>
-<div class="sub"><b>PU Learning:</b> os rótulos <b>engenharia</b> e <b>obras</b> são positivos confiáveis; só <b>serviços gerais</b> é ruidoso.</div>
-<div class="leg">
-  <span class="k"><span class="sw in"></span> entrada (dado/arquivo consumido pela etapa)</span>
-  <span class="k"><span class="sw out"></span> saída (artefato gerado)</span>
-  <span class="k"><span class="sw ar"></span> rótulo na seta = dado que segue adiante</span>
-</div>
+<div class="sub"><b>Ideia central (PU Learning):</b> os contratos rotulados como <b>engenharia</b> e <b>obras</b> são exemplos confiáveis; só o rótulo <b>serviços gerais</b> é ruidoso — e é nele que se escondem obras/engenharia mal classificadas. As setas indicam o que passa de uma fase à seguinte.</div>
 <div class="board"><div class="phase"><div class="phead" style="background:#2c5f8a">FASE A · COLETA E PREPARAÇÃO</div>
       <div class="pbody" style="background:#eef4fa;border:1px solid #dbe7f3"><div class="card" style="border-left:6px solid #2c5f8a">
-          <div class="inrow"><span class="cin">API PNCP /v1/contratos</span></div>
           <div class="chead"><span class="badge" style="background:#2c5f8a">1</span>
             <span class="ctitle">Coleta de dados</span></div>
-          <div class="cdesc">Baixa contratos do PNCP e filtra as categorias de interesse.</div>
-          <div class="outrow"><span class="pill" style="border-color:#2c5f8a;background:#eef4fa">contratos.parquet</span></div>
-        </div><div class="vconn"><span class="vlabel">contratos.parquet</span><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #2c5f8a">
-          
+          <div class="cdesc">Baixa contratos do PNCP e separa obras, engenharia e serviços gerais pela categoria informada pelo órgão.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #2c5f8a">
           <div class="chead"><span class="badge" style="background:#2c5f8a">2</span>
-            <span class="ctitle">Pré-processamento + EDA</span></div>
-          <div class="cdesc">Limpa boilerplate, tokeniza (RSLP) e resume a base.</div>
-          <div class="outrow"><span class="pill" style="border-color:#2c5f8a;background:#eef4fa">df limpo (objeto)</span><span class="pill" style="border-color:#2c5f8a;background:#eef4fa">01_distribuicao.png</span></div>
-        </div></div></div><div class="hconn"><div class="arrowline"></div>
-          <div class="hlabel">objetos limpos</div><div class="chev">&#8250;</div></div><div class="phase"><div class="phead" style="background:#c8702a">FASE B · MODELAGEM PU</div>
+            <span class="ctitle">Pré-processamento</span></div>
+          <div class="cdesc">Padroniza os objetos e remove os termos burocráticos repetidos que não distinguem o serviço.</div></div></div></div><div class="hconn"><div class="arrowline"></div>
+          <div class="hlabel">objetos padronizados</div><div class="chev">&#8250;</div></div><div class="phase"><div class="phead" style="background:#c8702a">FASE B · MODELAGEM (PU Learning)</div>
       <div class="pbody" style="background:#fdf3ec;border:1px solid #fde3cc"><div class="card" style="border-left:6px solid #c8702a">
-          
           <div class="chead"><span class="badge" style="background:#c8702a">3</span>
-            <span class="ctitle">Embeddings SBERT + filtro PU</span></div>
-          <div class="cdesc">Vetoriza os objetos e mede a similaridade dos “geral” ao centróide de eng+obras.</div>
-          <div class="outrow"><span class="pill" style="border-color:#c8702a;background:#fdf3ec">X_emb</span><span class="pill" style="border-color:#c8702a;background:#fdf3ec">rotulo_treino</span><span class="pill" style="border-color:#c8702a;background:#fdf3ec">02_filtro_pu.png</span></div>
-        </div><div class="vconn"><span class="vlabel">X_emb dos candidatos</span><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #c8702a">
-          
+            <span class="ctitle">Representação semântica + filtro PU</span></div>
+          <div class="cdesc">Transforma cada objeto em vetor de significado e aproxima os “serviços gerais” do núcleo de engenharia, isolando os candidatos suspeitos.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #c8702a">
           <div class="chead"><span class="badge" style="background:#c8702a">4</span>
-            <span class="ctitle">Clusterização auto-k</span></div>
-          <div class="cdesc">Agrupa os candidatos (KMeans k=6–12) e mede a pureza de cada cluster.</div>
-          <div class="outrow"><span class="pill" style="border-color:#c8702a;background:#fdf3ec">clusters + pureza</span><span class="pill" style="border-color:#c8702a;background:#fdf3ec">03_clusters.png</span></div>
-        </div><div class="vconn"><span class="vlabel">amostras por grupo</span><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #c8702a">
-          
+            <span class="ctitle">Agrupamento</span></div>
+          <div class="cdesc">Agrupa os candidatos por semelhança e mede a densidade de engenharia confirmada em cada grupo.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #c8702a">
           <div class="chead"><span class="badge" style="background:#c8702a">5</span>
-            <span class="ctitle">Perfis (LLM)</span></div>
-          <div class="cdesc">LLM descreve o padrão léxico de engenharia vs não-engenharia.</div>
-          <div class="outrow"><span class="pill" style="border-color:#c8702a;background:#fdf3ec">05_perfis.json</span></div>
-        </div><div class="vconn"><span class="vlabel">X_emb + rótulos certeiros</span><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #c8702a">
-          
+            <span class="ctitle">Perfis de domínio (IA)</span></div>
+          <div class="cdesc">A IA descreve o vocabulário típico de engenharia e de não-engenharia, formando o contexto do domínio.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #c8702a">
           <div class="chead"><span class="badge" style="background:#c8702a">6</span>
             <span class="ctitle">Treino + calibração</span></div>
-          <div class="cdesc">Treina 8 classificadores, escolhe o melhor (F1 macro) e calibra as probabilidades.</div>
-          <div class="outrow"><span class="pill" style="border-color:#c8702a;background:#fdf3ec">modelo_final.joblib</span><span class="pill" style="border-color:#c8702a;background:#fdf3ec">06_confusao.png</span></div>
-        </div></div></div><div class="hconn"><div class="arrowline"></div>
-          <div class="hlabel">modelo calibrado</div><div class="chev">&#8250;</div></div><div class="phase"><div class="phead" style="background:#5a8a2c">FASE C · DETECÇÃO E VALIDAÇÃO</div>
+          <div class="cdesc">Treina classificadores com os casos confiáveis e calibra a chance de um contrato ser engenharia.</div></div></div></div><div class="hconn"><div class="arrowline"></div>
+          <div class="hlabel">modelo treinado</div><div class="chev">&#8250;</div></div><div class="phase"><div class="phead" style="background:#5a8a2c">FASE C · DETECÇÃO E VALIDAÇÃO</div>
       <div class="pbody" style="background:#f0f5e7;border:1px solid #e7f0d9"><div class="card" style="border-left:6px solid #5a8a2c">
-          <div class="inrow"><span class="cin">pureza dos clusters (etapa 4)</span></div>
           <div class="chead"><span class="badge" style="background:#5a8a2c">7</span>
-            <span class="ctitle">Pontuação + score de suspeita</span></div>
-          <div class="cdesc">Pontua todos os “geral” e combina a probabilidade com a pureza do cluster.</div>
-          <div class="outrow"><span class="pill" style="border-color:#5a8a2c;background:#f0f5e7">07_ranking_suspeitos.csv</span></div>
-        </div><div class="vconn"><span class="vlabel">ranking</span><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #5a8a2c">
-          <div class="inrow"><span class="cin">08_validacao.csv (rótulos humanos)</span></div>
+            <span class="ctitle">Pontuação + ranqueamento</span></div>
+          <div class="cdesc">Pontua todos os “serviços gerais” e combina a probabilidade com a densidade do grupo, gerando o ranking de suspeitos.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #5a8a2c">
           <div class="chead"><span class="badge" style="background:#5a8a2c">8</span>
             <span class="ctitle">Validação manual</span></div>
-          <div class="cdesc">Amostra rotulada à mão define precisão/recall e o limiar ótimo.</div>
-          <div class="outrow"><span class="pill" style="border-color:#5a8a2c;background:#f0f5e7">métricas</span><span class="pill" style="border-color:#5a8a2c;background:#f0f5e7">08_curva_limiar.png</span></div>
-        </div><div class="vconn"><span class="vlabel">limiar + classe_final</span><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #5a8a2c">
-          
+          <div class="cdesc">Uma amostra aleatória rotulada à mão mede a precisão real do modelo e define o ponto de corte.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #5a8a2c">
           <div class="chead"><span class="badge" style="background:#5a8a2c">9</span>
             <span class="ctitle">Visualização</span></div>
-          <div class="cdesc">Projeção UMAP 2D, rede k-NN e curva de limiar.</div>
-          <div class="outrow"><span class="pill" style="border-color:#5a8a2c;background:#f0f5e7">09_umap</span><span class="pill" style="border-color:#5a8a2c;background:#f0f5e7">09_grafo_knn</span></div>
-        </div><div class="vconn"><span class="vlabel">top suspeitos</span><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #5a8a2c">
-          
+          <div class="cdesc">Projeta os contratos em 2D e em rede de similaridade: os suspeitos aparecem colados à engenharia confirmada.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #5a8a2c">
           <div class="chead"><span class="badge" style="background:#5a8a2c">10</span>
-            <span class="ctitle">Veredito LLM</span></div>
-          <div class="cdesc">LLM revisa os suspeitos do topo (reforma e instalação predial contam como engenharia).</div>
-          <div class="outrow"><span class="pill" style="border-color:#5a8a2c;background:#f0f5e7">10_veredito_llm.csv</span></div>
-        </div></div></div><div class="hconn"><div class="arrowline"></div>
-          <div class="hlabel">suspeitos</div><div class="chev">&#8250;</div></div><div class="phase"><div class="phead" style="background:#b03030">FASE D · RITO E ENTREGA</div>
+            <span class="ctitle">Revisão por IA</span></div>
+          <div class="cdesc">A IA revisa os suspeitos do topo usando o contexto do domínio, descartando falsos positivos.</div></div></div></div><div class="hconn"><div class="arrowline"></div>
+          <div class="hlabel">suspeitos priorizados</div><div class="chev">&#8250;</div></div><div class="phase"><div class="phead" style="background:#b03030">FASE D · VERIFICAÇÃO E ENTREGA</div>
       <div class="pbody" style="background:#f9ecec;border:1px solid #f6dcdc"><div class="card" style="border-left:6px solid #b03030">
-          <div class="inrow"><span class="cin">API PNCP (detalhe)</span></div>
-          <div class="chead"><span class="badge" style="background:#b03030">11a</span>
-            <span class="ctitle">Enriquecimento da compra</span></div>
-          <div class="cdesc">Resolve o vínculo contrato→compra dos suspeitos, com cache.</div>
-          <div class="outrow"><span class="pill" style="border-color:#b03030;background:#f9ecec">enriquecimento_compra.csv</span></div>
-        </div><div class="vconn"><span class="vlabel">vínculo da compra</span><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #b03030">
-          <div class="inrow"><span class="cin">PDFs da licitação</span></div>
-          <div class="chead"><span class="badge" style="background:#b03030">11b</span>
-            <span class="ctitle">Análise de rito</span></div>
-          <div class="cdesc">Baixa TR / Projeto Básico / Edital e verifica CREA/ART, projeto básico e ABNT.</div>
-          <div class="outrow"><span class="pill" style="border-color:#b03030;background:#f9ecec">11_analise_rito.csv</span><span class="pill" style="border-color:#b03030;background:#f9ecec">11_rito.png</span></div>
-        </div><div class="vconn"><span class="vlabel">vereditos</span><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #b03030">
-          
+          <div class="chead"><span class="badge" style="background:#b03030">11</span>
+            <span class="ctitle">Análise do rito de engenharia</span></div>
+          <div class="cdesc">Abre o edital / Termo de Referência da licitação e verifica se o rito foi seguido (ART/CREA, projeto básico, normas ABNT): distingue subenquadramento real de rótulo apenas equivocado.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #b03030">
           <div class="chead"><span class="badge" style="background:#b03030">12</span>
-            <span class="ctitle">Exportação + reuso</span></div>
-          <div class="cdesc">Salva modelo, CSVs e relatório; classifica novos contratos do último mês.</div>
-          <div class="outrow"><span class="pill" style="border-color:#b03030;background:#f9ecec">modelo_final.joblib</span><span class="pill" style="border-color:#b03030;background:#f9ecec">relatorio_vivo.md</span></div>
-        </div></div></div></div>
-<div class="foot"><b>Cores por fase:</b> azul = coleta · laranja = modelagem PU · verde = detecção/validação · vermelho = rito e entrega &nbsp;|&nbsp; conformidade: Lei 14.133/2021 · Lei 5.194/66 · CONFEA (apenas CREA/ART).</div>
+            <span class="ctitle">Consolidação e reuso</span></div>
+          <div class="cdesc">Reúne modelo, ranking e evidências num relatório e permite triar automaticamente novos contratos.</div></div></div></div></div>
+<div class="foot"><b>Fundamentação:</b> Lei 14.133/2021 · Lei 5.194/66 · resoluções do CONFEA (apenas engenharia — CREA/ART; arquitetura fora do escopo).</div>
 </body></html>
