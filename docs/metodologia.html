@@ -1,0 +1,125 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Segoe UI",-apple-system,"Helvetica Neue",Arial,sans-serif;
+  background:#ffffff;color:#1f2933;padding:44px 40px 48px;width:2320px}
+h1{font-size:30px;font-weight:800;color:#12303f;letter-spacing:.2px}
+.sub{font-size:15.5px;color:#5b6b78;margin:8px 0 30px}
+.sub b{color:#12303f}
+.board{display:flex;align-items:stretch;gap:0}
+.phase{display:flex;flex-direction:column;width:520px}
+.phead{color:#fff;font-weight:800;font-size:15px;letter-spacing:.6px;
+  padding:11px 16px;border-radius:12px 12px 0 0;text-align:center}
+.pbody{flex:1;border-radius:0 0 14px 14px;padding:18px 16px 20px;
+  display:flex;flex-direction:column}
+.card{background:#fff;border-radius:12px;padding:14px 16px 13px;
+  box-shadow:0 3px 10px rgba(20,40,60,.09);border:1px solid #eef1f4}
+.chead{display:flex;align-items:center;gap:10px;margin-bottom:7px}
+.badge{color:#fff;font-weight:800;font-size:14px;min-width:30px;height:30px;
+  border-radius:50%;display:flex;align-items:center;justify-content:center;
+  padding:0 6px}
+.ctitle{font-size:16.5px;font-weight:700;color:#16232e;line-height:1.15}
+.cdesc{font-size:13.8px;color:#46545f;line-height:1.4;margin:2px 2px 11px}
+.pills{display:flex;flex-wrap:wrap;gap:6px}
+.pill{font-family:"Consolas","SF Mono",monospace;font-size:11.7px;
+  background:#f1f4f7;color:#2b3a45;border:1px solid #e2e8ee;
+  padding:3px 9px;border-radius:999px;white-space:nowrap}
+.vconn{text-align:center;color:#9aa7b1;font-size:22px;line-height:1;
+  margin:7px 0}
+.hconn{display:flex;flex-direction:column;align-items:center;justify-content:center;
+  width:120px;position:relative}
+.arrowline{position:absolute;top:50%;left:6px;right:6px;height:3px;
+  background:#c3ccd4;border-radius:2px}
+.hlabel{position:relative;background:#fff;border:1px solid #d5dde3;
+  color:#4a5a66;font-size:12.5px;font-style:italic;padding:3px 10px;
+  border-radius:999px;margin-bottom:6px;z-index:2}
+.chev{position:relative;color:#8a97a1;font-size:40px;line-height:.6;z-index:2;
+  background:#fff;padding:0 2px}
+.foot{margin-top:26px;font-size:13px;color:#7a8893}
+.foot b{color:#3a4a55}
+</style></head><body>
+<h1>Metodologia — Identificação de subenquadramento de engenharia no PNCP</h1>
+<div class="sub">Insight central: <b>PU Learning</b> — os rótulos <b>engenharia</b> e <b>obras</b> são positivos confiáveis; só o rótulo <b>serviços gerais</b> é ruidoso. As etiquetas em cada cartão são os <b>artefatos gerados</b>; os rótulos nas setas indicam o dado que passa adiante.</div>
+<div class="board"><div class="phase">
+      <div class="phead" style="background:#2c5f8a">FASE A · COLETA E PREPARAÇÃO</div>
+      <div class="pbody" style="background:#eef4fa;border:1px solid #dbe7f3"><div class="card" style="border-left:6px solid #2c5f8a">
+          <div class="chead"><span class="badge" style="background:#2c5f8a">1</span>
+            <span class="ctitle">Coleta de dados</span></div>
+          <div class="cdesc">Baixa contratos do PNCP e filtra as categorias de interesse.</div>
+          <div class="pills"><span class="pill">contratos.parquet</span></div>
+        </div><div class="vconn">&#8595;</div><div class="card" style="border-left:6px solid #2c5f8a">
+          <div class="chead"><span class="badge" style="background:#2c5f8a">2</span>
+            <span class="ctitle">Pré-processamento + EDA</span></div>
+          <div class="cdesc">Limpa boilerplate, tokeniza (RSLP) e resume a base.</div>
+          <div class="pills"><span class="pill">df limpo</span><span class="pill">01_distribuicao.png</span></div>
+        </div></div>
+    </div><div class="hconn"><div class="arrowline"></div>
+          <div class="hlabel">objetos limpos</div><div class="chev">&#8250;</div></div><div class="phase">
+      <div class="phead" style="background:#c8702a">FASE B · MODELAGEM PU</div>
+      <div class="pbody" style="background:#fdf3ec;border:1px solid #fde3cc"><div class="card" style="border-left:6px solid #c8702a">
+          <div class="chead"><span class="badge" style="background:#c8702a">3</span>
+            <span class="ctitle">Embeddings SBERT + filtro PU</span></div>
+          <div class="cdesc">Vetoriza os objetos e mede a similaridade dos “geral” ao centróide de eng+obras.</div>
+          <div class="pills"><span class="pill">X_emb</span><span class="pill">rotulo_treino</span><span class="pill">02_filtro_pu.png</span></div>
+        </div><div class="vconn">&#8595;</div><div class="card" style="border-left:6px solid #c8702a">
+          <div class="chead"><span class="badge" style="background:#c8702a">4</span>
+            <span class="ctitle">Clusterização auto-k</span></div>
+          <div class="cdesc">Agrupa os candidatos (KMeans k=6–12 por silhouette) e mede a pureza de cada cluster.</div>
+          <div class="pills"><span class="pill">clusters + pureza</span><span class="pill">03_clusters.png</span></div>
+        </div><div class="vconn">&#8595;</div><div class="card" style="border-left:6px solid #c8702a">
+          <div class="chead"><span class="badge" style="background:#c8702a">5</span>
+            <span class="ctitle">Perfis (LLM)</span></div>
+          <div class="cdesc">LLM descreve o padrão léxico de engenharia vs não-engenharia.</div>
+          <div class="pills"><span class="pill">05_perfis.json</span></div>
+        </div><div class="vconn">&#8595;</div><div class="card" style="border-left:6px solid #c8702a">
+          <div class="chead"><span class="badge" style="background:#c8702a">6</span>
+            <span class="ctitle">Treino + calibração</span></div>
+          <div class="cdesc">Treina 8 classificadores, escolhe o melhor (F1 macro) e calibra as probabilidades.</div>
+          <div class="pills"><span class="pill">modelo_final.joblib</span><span class="pill">06_confusao.png</span></div>
+        </div></div>
+    </div><div class="hconn"><div class="arrowline"></div>
+          <div class="hlabel">modelo + X_emb</div><div class="chev">&#8250;</div></div><div class="phase">
+      <div class="phead" style="background:#5a8a2c">FASE C · DETECÇÃO E VALIDAÇÃO</div>
+      <div class="pbody" style="background:#f0f5e7;border:1px solid #e7f0d9"><div class="card" style="border-left:6px solid #5a8a2c">
+          <div class="chead"><span class="badge" style="background:#5a8a2c">7</span>
+            <span class="ctitle">Pontuação + score de suspeita</span></div>
+          <div class="cdesc">Pontua todos os “geral” e combina a probabilidade com a pureza do cluster.</div>
+          <div class="pills"><span class="pill">07_ranking_suspeitos.csv</span></div>
+        </div><div class="vconn">&#8595;</div><div class="card" style="border-left:6px solid #5a8a2c">
+          <div class="chead"><span class="badge" style="background:#5a8a2c">8</span>
+            <span class="ctitle">Validação manual</span></div>
+          <div class="cdesc">Amostra rotulada à mão define precisão/recall e o limiar ótimo.</div>
+          <div class="pills"><span class="pill">métricas</span><span class="pill">08_curva_limiar.png</span></div>
+        </div><div class="vconn">&#8595;</div><div class="card" style="border-left:6px solid #5a8a2c">
+          <div class="chead"><span class="badge" style="background:#5a8a2c">9</span>
+            <span class="ctitle">Visualização</span></div>
+          <div class="cdesc">Projeção UMAP 2D, rede de similaridade k-NN e curva de limiar.</div>
+          <div class="pills"><span class="pill">09_umap</span><span class="pill">09_grafo_knn</span></div>
+        </div><div class="vconn">&#8595;</div><div class="card" style="border-left:6px solid #5a8a2c">
+          <div class="chead"><span class="badge" style="background:#5a8a2c">10</span>
+            <span class="ctitle">Veredito LLM</span></div>
+          <div class="cdesc">LLM revisa os suspeitos do topo (reforma e instalação predial contam como engenharia).</div>
+          <div class="pills"><span class="pill">10_veredito_llm.csv</span></div>
+        </div></div>
+    </div><div class="hconn"><div class="arrowline"></div>
+          <div class="hlabel">suspeitos</div><div class="chev">&#8250;</div></div><div class="phase">
+      <div class="phead" style="background:#b03030">FASE D · RITO E ENTREGA</div>
+      <div class="pbody" style="background:#f9ecec;border:1px solid #f6dcdc"><div class="card" style="border-left:6px solid #b03030">
+          <div class="chead"><span class="badge" style="background:#b03030">11a</span>
+            <span class="ctitle">Enriquecimento da compra</span></div>
+          <div class="cdesc">Resolve o vínculo contrato→compra dos suspeitos, com cache.</div>
+          <div class="pills"><span class="pill">enriquecimento_compra.csv</span></div>
+        </div><div class="vconn">&#8595;</div><div class="card" style="border-left:6px solid #b03030">
+          <div class="chead"><span class="badge" style="background:#b03030">11b</span>
+            <span class="ctitle">Análise de rito</span></div>
+          <div class="cdesc">Baixa TR / Projeto Básico / Edital e verifica CREA/ART, projeto básico e ABNT.</div>
+          <div class="pills"><span class="pill">11_analise_rito.csv</span><span class="pill">11_rito.png</span></div>
+        </div><div class="vconn">&#8595;</div><div class="card" style="border-left:6px solid #b03030">
+          <div class="chead"><span class="badge" style="background:#b03030">12</span>
+            <span class="ctitle">Exportação + reuso</span></div>
+          <div class="cdesc">Salva modelo, CSVs e relatório; classifica novos contratos do último mês.</div>
+          <div class="pills"><span class="pill">modelo_final.joblib</span><span class="pill">relatorio_vivo.md</span></div>
+        </div></div>
+    </div></div>
+<div class="foot"><b>Legenda:</b> azul = coleta &nbsp;·&nbsp; laranja = modelagem PU &nbsp;·&nbsp; verde = detecção/validação &nbsp;·&nbsp; vermelho = rito e entrega &nbsp;|&nbsp; conformidade: Lei 14.133/2021 · Lei 5.194/66 · CONFEA (apenas CREA/ART).</div>
+</body></html>
