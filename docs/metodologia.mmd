@@ -1,49 +1,41 @@
-%%{init: {'theme':'base','themeVariables':{'fontSize':'13px'}}}%%
+%%{init: {'theme':'base','themeVariables':{'fontSize':'12px'}}}%%
 flowchart LR
-  classDef coleta fill:#dbe7f3,stroke:#2c5f8a,color:#11314d;
-  classDef model  fill:#fde3cc,stroke:#c8702a,color:#5a330f;
-  classDef detec  fill:#e7f0d9,stroke:#5a8a2c,color:#2d4a12;
-  classDef rito   fill:#f6dcdc,stroke:#b03030,color:#5a1212;
-  classDef saida  fill:#ece5f6,stroke:#6a4ca0,color:#33215c;
+  classDef coleta fill:#dbe7f3,stroke:#2c5f8a,color:#11314d,text-align:left;
+  classDef model  fill:#fde3cc,stroke:#c8702a,color:#5a330f,text-align:left;
+  classDef detec  fill:#e7f0d9,stroke:#5a8a2c,color:#2d4a12,text-align:left;
+  classDef rito   fill:#f6dcdc,stroke:#b03030,color:#5a1212,text-align:left;
 
-  subgraph S1["1 · COLETA E DEFINIÇÃO DO ESCOPO"]
+  subgraph FA["FASE A · COLETA E PREPARAÇÃO"]
     direction TB
-    A1["<b>Coleta de dados (JSON) do PNCP</b><br/><i>API pública oficial · Lei 14.133/2021</i>"]:::coleta
-    A2["<b>Estatística descritiva</b><br/><i>modalidade, tipo, esfera, região</i>"]:::coleta
-    A3["<b>Filtragem inicial</b><br/><i>período, esfera, órgãos, modalidade,<br/>categoria do item · rótulos: engenharia,<br/>obras, serviços gerais (cat. 8)</i>"]:::coleta
-    A1 --> A2 --> A3
+    E1["<b>1 · Coleta de dados</b><br/><i>faz:</i> baixa contratos do PNCP e filtra categorias de interesse<br/><i>entra:</i> API pública PNCP /v1/contratos (Lei 14.133/2021)<br/><i>sai:</i> contratos.parquet · rótulo = engenharia / obras / geral"]:::coleta
+    E2["<b>2 · Pré-processamento + EDA</b><br/><i>faz:</i> limpa boilerplate, tokeniza (RSLP), estatística descritiva<br/><i>entra:</i> contratos.parquet<br/><i>sai:</i> df limpo (coluna objeto) · 01_distribuicao.png"]:::coleta
+    E1 --> E2
   end
 
-  subgraph S2["2 · MODELAGEM PU (Positive-Unlabeled)"]
+  subgraph FB["FASE B · MODELAGEM PU (Positive-Unlabeled)"]
     direction TB
-    B0["<b>Rotulagem PU</b><br/><i>positivos confiáveis = engenharia + obras<br/>ruidoso = serviços gerais · base ~93% 'geral'<br/>(só o positivo é confiável)</i>"]:::model
-    B1["<b>Pré-tratamento + limpeza de boilerplate</b><br/><i>remove prefixos burocráticos p/ não<br/>inflar a similaridade</i>"]:::model
-    B2["<b>Embeddings semânticos SBERT</b><br/><i>distiluse-base-multilingual · normalização L2</i>"]:::model
-    B3["<b>Filtro por similaridade ao centróide eng+obras</b><br/><i>separa candidatos × negativos confiáveis</i>"]:::model
-    B4["<b>Clusterização auto-k (KMeans)</b><br/><i>k 6–12 pelo melhor silhouette (cosseno)<br/>descritores TF-IDF + stemmer RSLP</i>"]:::model
-    B5["<b>Revisão de clusters assistida por LLM</b>"]:::model
-    B6["<b>Treino de classificadores supervisionados</b><br/><i>LogReg, RF, ExtraTrees, GB, SVM, kNN, MLP, NB<br/>melhor modelo por F1 macro (holdout)</i>"]:::model
-    B0 --> B1 --> B2 --> B3 --> B4 --> B5 --> B6
+    E3["<b>3 · Embeddings SBERT + filtro PU</b><br/><i>faz:</i> gera embeddings; mede similaridade dos 'geral' ao centróide eng+obras<br/><i>entra:</i> objetos limpos<br/><i>sai:</i> X_emb · rotulo_treino = eng_obra / nao / candidato · 02_filtro_pu.png"]:::model
+    E4["<b>4 · Clusterização auto-k</b><br/><i>faz:</i> KMeans k=6–12 (melhor silhouette) nos candidatos; descritores TF-IDF<br/><i>entra:</i> X_emb dos candidatos<br/><i>sai:</i> clusters + pureza (pct_certeiros) · 03_clusters.png · 04_revisao_clusters.csv"]:::model
+    E5["<b>5 · Perfis (LLM)</b><br/><i>faz:</i> LLM descreve o padrão léxico de eng_obra vs nao (documental)<br/><i>entra:</i> amostras de cada grupo<br/><i>sai:</i> 05_perfis.json"]:::model
+    E6["<b>6 · Treino + calibração</b><br/><i>faz:</i> treina 8 classificadores, escolhe por F1 macro, calibra (isotonic)<br/><i>entra:</i> X_emb dos certeiros (eng_obra vs nao)<br/><i>sai:</i> modelo calibrado · 06_confusao.png · modelo_final.joblib"]:::model
+    E3 --> E4 --> E5 --> E6
   end
 
-  subgraph S3["3 · DETECÇÃO DE SUBENQUADRAMENTO"]
+  subgraph FC["FASE C · DETECÇÃO E VALIDAÇÃO"]
     direction TB
-    C1["<b>Pontua TODOS os 'serviços gerais'</b><br/><i>predict_proba → prob. de ser engenharia</i>"]:::detec
-    C2["<b>Ranking de suspeitos + corte por limiar</b><br/><i>limiar vindo da validação (máx. F1), não fixo</i>"]:::detec
-    C3["<b>Validação manual (~80 contratos, estratificada)</b><br/><i>precisão / recall / F1 honestos</i>"]:::detec
-    C4["<b>Veredito LLM nos suspeitos do topo</b><br/><i>cruzamento ML × LLM reduz falso positivo</i>"]:::detec
-    C5["<b>Visualização: UMAP 2D + rede k-NN + curva de limiar</b><br/><i>suspeitos colados aos eng confirmados</i>"]:::detec
-    C1 --> C2 --> C3 --> C4 --> C5
+    E7["<b>7 · Pontua todos os 'geral' + score</b><br/><i>faz:</i> prob_eng_obra em todo 'geral'; combina com pureza do cluster<br/><i>entra:</i> X_emb dos 'geral' · modelo calibrado · pureza<br/><i>sai:</i> ranking por score_suspeita · 07_ranking_suspeitos.csv"]:::detec
+    E8["<b>8 · Validação manual</b><br/><i>faz:</i> varre limiares → precisão/recall/F1; ajusta o LIMIAR ótimo<br/><i>entra:</i> 08_validacao.csv rotulado à mão (~80–100)<br/><i>sai:</i> métricas honestas · limiar · 08_curva_limiar.png"]:::detec
+    E9["<b>9 · Visualização</b><br/><i>faz:</i> projeção UMAP 2D, rede k-NN, curva de limiar<br/><i>entra:</i> X_emb (amostra) · classe_final<br/><i>sai:</i> 09_umap.png/.html · 09_grafo_knn.png"]:::detec
+    E10["<b>10 · Veredito LLM</b><br/><i>faz:</i> LLM revisa os top suspeitos (reforma/instalação predial = engenharia)<br/><i>entra:</i> topo do ranking (por score)<br/><i>sai:</i> 10_veredito_llm.csv"]:::detec
+    E7 --> E8 --> E9 --> E10
   end
 
-  subgraph S4["4 · ANÁLISE DE RITO (evidência definitiva)"]
+  subgraph FD["FASE D · RITO E ENTREGA"]
     direction TB
-    D1["<b>Baixa documentos dos suspeitos</b><br/><i>resolve contrato → compra (numeroControlePNCP)<br/>endpoint /compras/{ano}/{seq}/arquivos<br/>TR / Projeto Básico / Edital</i>"]:::rito
-    D2["<b>Detecta marcadores legais no TR</b><br/><i>CREA/ART, projeto básico, ABNT, Lei 14.133/2021<br/>extração PyMuPDF + regex · SEM CAU/RRT</i>"]:::rito
-    D3["<b>Veredito por contrato</b><br/><i>subenquadramento real × rótulo errado, processo ok<br/>× indeterminado · base: Lei 5.194/66 + CONFEA</i>"]:::rito
-    D1 --> D2 --> D3
+    E11a["<b>11a · Enriquecimento da compra</b><br/><i>faz:</i> resolve numeroControlePNCPCompra dos suspeitos (API detalhe) + cache<br/><i>entra:</i> numeroControlePNCP dos suspeitos<br/><i>sai:</i> enriquecimento_compra.csv · coluna no df"]:::rito
+    E11b["<b>11b · Análise de rito</b><br/><i>faz:</i> baixa TR/Projeto Básico/Edital; detecta CREA/ART, projeto básico, ABNT + LLM<br/><i>entra:</i> vínculo da compra · PDFs da licitação<br/><i>sai:</i> veredito por contrato · 11_analise_rito.csv · 11_rito.png"]:::rito
+    E12["<b>12 · Exportação + reuso</b><br/><i>faz:</i> salva modelo/CSVs/relatório; classifica novos objetos (último mês via API)<br/><i>entra:</i> modelo calibrado · novos contratos<br/><i>sai:</i> modelo_final.joblib · relatorio_vivo.md · 13_novos_classificados.csv"]:::rito
+    E11a --> E11b --> E12
   end
 
-  OUT["<b>Artefatos gerados</b><br/>modelo_final.joblib · 07_ranking_suspeitos.csv · 08_validacao.csv<br/>11_analise_rito.csv · figuras (clusters, UMAP, grafo k-NN, curva de limiar)<br/>relatorio_vivo.md"]:::saida
-
-  S1 --> S2 --> S3 --> S4 --> OUT
+  FA --> FB --> FC --> FD
