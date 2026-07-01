@@ -1,180 +1,194 @@
 # Briefing para gerar o slide de Metodologia (TCC)
 
-> Este documento é autossuficiente: entregue-o a uma IA geradora de imagens/slides
-> para produzir **um único slide** de metodologia. Contém o contexto da pesquisa,
-> a descrição detalhada de cada etapa (o que faz, por quê, o que entra e o que
-> sai) e as instruções de design ao final.
+> Autossuficiente: entregue-o a uma IA geradora de imagens/slides para produzir
+> **um único slide** de metodologia. Contém contexto, descrição detalhada de cada
+> etapa (o que faz / por quê / entra / sai / **técnica**), o resumo técnico do
+> stack e as instruções de design.
 
 ---
 
-## 1. Contexto da pesquisa (para a IA entender o tema)
+## 1. Contexto da pesquisa
 
-**Problema.** No Brasil, as contratações públicas são publicadas no **PNCP**
-(Portal Nacional de Contratações Públicas). Cada contrato recebe uma
-**categoria** informada pelo próprio órgão: *obras*, *serviços de engenharia* ou
-*serviços gerais*, entre outras. Ocorre que muitos contratos de **engenharia/obras**
-são cadastrados como **"serviços gerais"** — fenômeno chamado **subenquadramento**.
-Isso é irregular à luz da **Lei 14.133/2021** (Nova Lei de Licitações), porque
-obras e serviços de engenharia exigem um **rito próprio**: ART/CREA (Anotação de
-Responsabilidade Técnica / Conselho Regional de Engenharia), projeto básico,
-responsável técnico, normas ABNT, planilha orçamentária etc. Ao rotular como
-"serviços gerais", o órgão **escapa desse rito**.
+**Problema.** No **PNCP** (Portal Nacional de Contratações Públicas), cada
+contrato recebe uma **categoria** informada pelo órgão: *obras*, *serviços de
+engenharia* ou *serviços gerais*, entre outras. Muitos contratos de
+**engenharia/obras** são cadastrados como **"serviços gerais"** —
+**subenquadramento**. É irregular pela **Lei 14.133/2021**, pois obras e serviços
+de engenharia exigem **rito próprio** (ART/CREA, projeto básico, responsável
+técnico, ABNT, planilha orçamentária). Rotular como "serviços gerais" burla esse
+rito.
 
-**Objetivo do TCC.** Construir um pipeline de dados + IA que **encontre, na
-massa de "serviços gerais", os contratos que são de fato engenharia/obras** e,
-para os mais suspeitos, **verifique documentalmente** se o rito de engenharia
-foi cumprido — separando *subenquadramento real* de *mero erro de rótulo*.
+**Objetivo.** Pipeline de dados + IA que **detecte, na massa de "serviços
+gerais", os contratos que são de fato engenharia/obras** e, para os mais
+suspeitos, **verifique documentalmente** o cumprimento do rito — separando
+*subenquadramento real* de *mero erro de rótulo*.
 
-**Escopo.** Apenas **engenharia** (CREA/ART). **Arquitetura (CAU/RRT) está fora**
-do escopo.
+**Escopo.** Somente **engenharia** (CREA/ART). Arquitetura (CAU/RRT) fora.
 
-**Insight metodológico central — PU Learning (Positive-Unlabeled).** Os rótulos
-*engenharia* e *obras* são **confiáveis** (quando o órgão marca assim, é porque
-é). Só o rótulo *serviços gerais* é **ruidoso**: parte é serviço comum de
-verdade, parte é engenharia disfarçada. Então usamos os contratos de
-engenharia/obras como **âncora de positivos confiáveis** e tratamos "serviços
-gerais" como **não-rotulados** — daí o nome Positive-Unlabeled.
+**Insight metodológico — Positive-Unlabeled (PU) Learning.** *engenharia* e
+*obras* são **positivos confiáveis**; *serviços gerais* é a classe **não-rotulada
+ruidosa**. Aprendizado feito só com positivos confiáveis + não-rotulados.
 
-**Dados.** ~30 mil+ contratos coletados da API pública do PNCP; o texto usado é
-o **objeto da contratação** (a descrição do que está sendo contratado).
+**Dados.** ~30 mil+ contratos da API pública do PNCP; unidade de texto = **objeto
+da contratação**.
 
-**Fundamentação legal.** Lei 14.133/2021 (licitações); Lei 5.194/1966 (regula o
-exercício da engenharia); resoluções do **CONFEA** (definem o que é atividade de
-engenharia).
+**Base legal.** Lei 14.133/2021 (licitações) · Lei 5.194/1966 (exercício da
+engenharia) · resoluções do **CONFEA**.
 
 ---
 
-## 2. Fases e etapas (descrição detalhada — o que / por quê / entra / sai)
-
-O pipeline tem **4 fases** e **12 etapas**. Descrição de cada uma:
+## 2. Fases e etapas (o que / por quê / entra / sai / **técnica**)
 
 ### FASE A — Coleta e preparação
 **1. Coleta de dados**
-- *O que faz:* baixa os contratos publicados no PNCP via API oficial e filtra as
-  categorias de interesse (obras, serviços de engenharia, serviços gerais).
-- *Por quê:* montar a base de trabalho com o rótulo original do órgão.
-- *Entra:* API pública do PNCP. *Sai:* base de contratos rotulada por categoria.
+- *O que / por quê:* baixa contratos do PNCP e filtra as categorias de interesse.
+- *Entra:* API REST do PNCP. *Sai:* base rotulada (`categoriaProcesso`).
+- *Técnica:* ingestão via API `/v1/contratos`, paginação, persistência em
+  **Parquet**; rótulo derivado de `categoriaProcessoId`.
 
 **2. Pré-processamento**
-- *O que faz:* padroniza o texto do objeto e **remove os termos burocráticos
-  repetidos** (ex.: "contratação de empresa especializada para prestação de
-  serviços de…") que aparecem em quase todo contrato e não ajudam a distinguir.
-- *Por quê:* sem isso, todos os contratos parecem parecidos e a análise semântica
-  perde discriminação.
-- *Entra:* base bruta. *Sai:* objetos limpos e padronizados.
+- *O que / por quê:* padroniza o objeto e remove o **boilerplate** burocrático
+  ("contratação de empresa especializada para prestação de serviços de…") que não
+  discrimina e infla a similaridade.
+- *Entra:* base bruta. *Sai:* objetos limpos.
+- *Técnica:* normalização Unicode + *lowercasing*; **regex** de prefixos;
+  tokenização + **stemmer RSLP** (português) e **stopwords** de domínio para as
+  análises lexicais.
 
 ### FASE B — Modelagem (PU Learning)
 **3. Representação semântica + filtro PU**
-- *O que faz:* transforma cada objeto em um **vetor de significado** (embedding
-  SBERT, modelo de linguagem multilíngue) e mede a **proximidade** de cada
-  "serviços gerais" ao **núcleo semântico** dos contratos de engenharia/obras.
-  Os "gerais" próximos viram **candidatos suspeitos**; os distantes são tratados
-  como **não-engenharia confiável**.
-- *Por quê:* é o coração do PU — usar os positivos confiáveis para separar, no
-  meio ruidoso, o que merece investigação.
-- *Entra:* objetos limpos. *Sai:* vetores + separação candidatos × não-eng.
+- *O que / por quê:* vetoriza cada objeto e separa, entre os "gerais", os
+  **candidatos** (próximos da engenharia) dos **negativos confiáveis** (distantes).
+- *Entra:* objetos limpos. *Sai:* embeddings + máscara candidato/negativo.
+- *Técnica:* **Sentence-BERT** (modelo `distiluse-base-multilingual-cased-v1`),
+  embeddings **normalizados em L2**; **centróide** dos positivos (eng+obras);
+  **similaridade do cosseno** objeto↔centróide; corte por **quantil** (top 30%
+  dos "gerais" mais próximos = candidatos).
 
 **4. Agrupamento (clusterização)**
-- *O que faz:* agrupa os candidatos por semelhança (KMeans, k escolhido por
-  qualidade de coesão) e mede, em cada grupo, a **densidade de engenharia
-  confirmada** (quantos eng/obras caem ali).
-- *Por quê:* grupos com muita engenharia confirmada indicam que os "gerais"
-  vizinhos provavelmente também são engenharia. Serve de interpretação e de
-  **peso** na priorização.
-- *Entra:* vetores dos candidatos. *Sai:* grupos temáticos + índice de pureza.
+- *O que / por quê:* agrupa os candidatos e mede a **pureza** (densidade de
+  eng/obras) de cada grupo, usada depois como *prior*.
+- *Entra:* embeddings dos candidatos. *Sai:* clusters + `pct_certeiros`.
+- *Técnica:* **K-Means** com **k automático (6–12)** escolhido pelo maior
+  **silhouette score** (métrica do cosseno); descritores por cluster via
+  **TF-IDF** (uni+bigramas, stemmer RSLP).
 
-**5. Vocabulário de domínio (apoio de IA)**
-- *O que faz:* extrai da própria base o **vocabulário típico** de engenharia
-  versus não-engenharia (termos que mais distinguem as duas classes) e uma IA
-  descreve os perfis. Esse vocabulário vira **contexto** para as etapas com IA
-  mais adiante (10 e 11).
-- *Por quê:* aterrar a IA no vocabulário real do domínio, em vez de listas
-  subjetivas escritas à mão.
+**5. Vocabulário de domínio (apoio de LLM)**
+- *O que / por quê:* extrai da própria base o léxico que **discrimina** eng ×
+  não-eng; vira **contexto** para as etapas de LLM (10 e 11).
 - *Entra:* casos confiáveis. *Sai:* vocabulário/perfis de domínio.
+- *Técnica:* **log-odds ratio** (com suavização) sobre `CountVectorizer` binário
+  entre positivos e negativos; perfis sintetizados por **LLM**; curadoria manual
+  para remover ruído (topônimos, numerais).
 
 **6. Treino + calibração do classificador**
-- *O que faz:* treina classificadores (regressão logística, florestas, SVM, kNN,
-  redes neurais etc.) usando **só os casos confiáveis** (positivos = eng/obras;
-  negativos = "gerais" distantes), escolhe o melhor por F1 e **calibra** as
-  probabilidades.
-- *Por quê:* obter um modelo que estime, para qualquer contrato, a **chance de
-  ser engenharia**; a calibração faz o limiar de decisão ter sentido.
-- *Entra:* vetores dos casos confiáveis. *Sai:* modelo treinado e calibrado.
+- *O que / por quê:* treina só com **casos confiáveis** (positivos = eng+obras;
+  negativos = "gerais" distantes), seleciona o melhor e calibra a probabilidade.
+- *Entra:* embeddings rotulados. *Sai:* modelo calibrado.
+- *Técnica:* comparação de **8 classificadores** — **Regressão Logística,
+  Random Forest, Extra-Trees, Gradient Boosting, SVM (kernel RBF), k-NN, MLP,
+  Naive Bayes** — sobre os embeddings SBERT; *holdout* estratificado (80/20);
+  seleção por **F1 macro**; **calibração isotônica** (`CalibratedClassifierCV`)
+  para probabilidades confiáveis.
 
 ### FASE C — Detecção e validação
 **7. Pontuação + ranqueamento**
-- *O que faz:* aplica o modelo a **todos** os "serviços gerais" e combina a
-  probabilidade com a densidade do grupo (etapa 4), gerando um **ranking de
-  suspeitos** de subenquadramento.
-- *Por quê:* é o produto central — a lista priorizada do que investigar.
-- *Entra:* todos os "gerais" + modelo. *Sai:* ranking de suspeitos.
+- *O que / por quê:* aplica o modelo a **todos** os "gerais" e prioriza.
+- *Entra:* embeddings dos "gerais" + modelo. *Sai:* **ranking de suspeitos**.
+- *Técnica:* `predict_proba` (prob. de engenharia); **score combinado** =
+  `prob × (0,4 + 0,6 × pureza_do_cluster)` (injeta o *prior* de domínio da etapa
+  4); ordenação decrescente.
 
 **8. Validação manual**
-- *O que faz:* uma **amostra aleatória** de contratos é rotulada à mão pelo
-  pesquisador (engenheiro) e comparada ao modelo, produzindo **precisão, recall
-  e F1 reais**, além do **ponto de corte** ideal.
-- *Por quê:* é a única medida honesta de desempenho — dá rigor acadêmico ao TCC.
-- *Entra:* amostra rotulada à mão. *Sai:* métricas + limiar de decisão.
+- *O que / por quê:* mede o desempenho **real** e fixa o corte.
+- *Entra:* amostra rotulada à mão (n≈200). *Sai:* métricas + limiar.
+- *Técnica:* amostragem **aleatória com cota mínima por faixa** de probabilidade
+  (estratificação leve); *ground truth* humano; **varredura de limiar** (0,30–0,95)
+  maximizando **F1**; reporta **precisão, recall, F1** e **matriz de confusão**.
 
 **9. Visualização**
-- *O que faz:* projeta os contratos em 2D (UMAP) e como **rede de similaridade
-  (grafo k-NN)**, colorindo por classe.
-- *Por quê:* evidência visual de que os suspeitos ficam **colados** aos contratos
-  de engenharia confirmada — reforça o argumento.
-- *Entra:* vetores + classe. *Sai:* mapas e rede de similaridade.
+- *O que / por quê:* evidência visual de que os suspeitos ficam junto da
+  engenharia confirmada.
+- *Entra:* embeddings + classe. *Sai:* mapas e rede.
+- *Técnica:* redução de dimensionalidade **UMAP** (2D, `n_neighbors=15`,
+  `min_dist=0.1`, métrica do cosseno); **grafo de k-vizinhos** (`kneighbors_graph`)
+  renderizado com **NetworkX** + detecção de **comunidades por modularidade**;
+  gráficos em Matplotlib/Plotly.
 
-**10. Revisão por IA**
-- *O que faz:* uma IA (LLM) revisa os suspeitos do topo do ranking usando o
-  **contexto de domínio** (etapa 5), confirmando ou descartando cada um.
-- *Por quê:* reduz falsos positivos antes da etapa cara de verificação
-  documental.
-- *Entra:* suspeitos do topo. *Sai:* suspeitos filtrados/priorizados.
+**10. Revisão por IA (checagem cruzada)**
+- *O que / por quê:* filtra falsos positivos antes da verificação documental.
+- *Entra:* suspeitos do topo. *Sai:* suspeitos confirmados/refinados.
+- *Técnica:* **LLM Llama 3.1** (via **Ollama**, local em GPU) com **saída
+  estruturada JSON** e **contexto de domínio** (etapa 5); regra de decisão por
+  classe + confiança.
 
 ### FASE D — Verificação e entrega
 **11. Análise do rito de engenharia (evidência definitiva)**
-- *O que faz:* para os suspeitos priorizados, **baixa o edital / Termo de
-  Referência / Projeto Básico** da licitação e verifica se o **rito de
-  engenharia** foi seguido — procura ART/CREA, projeto básico, responsável
-  técnico, normas ABNT, planilha orçamentária, BDI, cronograma físico-financeiro
-  etc. Classifica cada caso como **subenquadramento real** (é engenharia e o rito
-  NÃO foi seguido) ou **rótulo equivocado com processo correto** (é engenharia
-  mas o rito foi seguido).
-- *Por quê:* é a **prova documental** — transforma "suspeita estatística" em
-  evidência jurídica.
-- *Entra:* documentos da licitação dos suspeitos. *Sai:* veredito por contrato.
+- *O que / por quê:* confirma documentalmente se o rito foi seguido.
+- *Entra:* documentos da licitação dos suspeitos. *Sai:* **veredito por contrato**.
+- *Técnica:* resolução **contrato → compra** pelo `numeroControlePNCP` (API do
+  PNCP `/orgaos/{cnpj}/compras/{ano}/{seq}/arquivos`); download de Edital/Termo de
+  Referência/Projeto Básico; **extração de texto com PyMuPDF**; **marcadores
+  legais por regex** (ART, CREA, projeto básico, responsável técnico, ABNT NBR,
+  art. 6º da Lei 14.133, **planilha orçamentária, BDI, SINAPI, SICRO, cronograma
+  físico-financeiro, caderno de encargos, alvará**); veredito do **LLM** sobre o
+  trecho do TR; classificação em **subenquadramento_real** vs
+  **rótulo_incorreto_processo_ok** vs *indeterminado*.
 
 **12. Consolidação e reuso**
-- *O que faz:* reúne modelo, ranking e evidências num relatório; permite
-  **classificar automaticamente novos contratos** publicados no PNCP.
-- *Por quê:* deixa uma ferramenta de triagem reaproveitável (ex.: para órgãos de
-  controle).
-- *Entra:* modelo + novos contratos. *Sai:* ferramenta/relatório final.
+- *O que / por quê:* entrega a ferramenta e os resultados.
+- *Entra:* modelo + novos contratos. *Sai:* relatório + triagem automática.
+- *Técnica:* serialização do **modelo (`joblib`)**; exportação de **CSVs** e
+  **relatório**; função de inferência para novos objetos (SBERT → modelo →
+  probabilidade), consultando a API do PNCP para o período mais recente.
 
 ---
 
-## 3. Fio condutor (a "história" do slide)
+## 3. Resumo técnico (stack e artefatos gerados)
 
-Base bruta → limpeza → **separar o suspeito do comum** (PU) → **treinar o modelo**
-→ **ranquear todos os "gerais"** → **validar com rigor** → **confirmar com IA** →
-**provar no documento** (rito) → **entregar a ferramenta**. Ou seja: da massa de
-dados até a evidência de subenquadramento.
+**Representação:** Sentence-BERT `distiluse-base-multilingual-cased-v1`
+(embeddings L2) · TF-IDF (uni+bigramas) + stemmer RSLP como descritor.
+**Aprendizado:** PU Learning (centróide + limiar por quantil); K-Means (silhouette);
+8 classificadores supervisionados; seleção por F1 macro; calibração isotônica.
+**Priorização:** probabilidade calibrada × pureza de cluster (score combinado).
+**Avaliação:** validação manual estratificada; precisão/recall/F1; varredura de
+limiar; matriz de confusão; silhouette.
+**IA generativa (LLM):** Llama 3.1 via Ollama (GPU), saída JSON, contexto de
+domínio derivado por log-odds.
+**Verificação documental:** API PNCP + PyMuPDF + marcadores legais por regex.
+**Visualização:** UMAP 2D, grafo k-NN (NetworkX + modularidade), Matplotlib/Plotly.
+**Ferramentas:** Python, scikit-learn, sentence-transformers, umap-learn, NetworkX,
+PyMuPDF, pandas; execução em **Google Colab (GPU)**.
+
+**Artefatos gerados:** matriz de embeddings; ranking de suspeitos; métricas de
+validação (precisão/recall/F1 + limiar); figuras (distribuição, filtro PU,
+clusters, UMAP, grafo k-NN, curva de limiar, matriz de confusão); veredito de
+rito por contrato; **modelo serializado** e relatório final.
 
 ---
 
-## 4. Instruções de design (para a IA que vai gerar o slide)
+## 4. Fio condutor (a "história" do slide)
 
-- **Formato:** UM slide único, proporção 16:9, horizontal.
-- **Estrutura:** 4 blocos/colunas (as 4 fases), com as etapas numeradas dentro de
-  cada bloco como itens curtos; setas horizontais entre os blocos com o rótulo do
-  que passa adiante (**objetos limpos → modelo treinado → suspeitos
-  priorizados**).
-- **Cores por fase (sugestão):** A = azul, B = laranja, C = verde, D = vermelho.
-- **Hierarquia:** título no topo; uma linha de "ideia central" (PU Learning) como
-  subtítulo; blocos no meio; fundamentação legal no rodapé (Lei 14.133/2021 · Lei
-  5.194/66 · CONFEA — apenas CREA/ART).
-- **Tom:** acadêmico, limpo, legível a distância (é para banca). Evitar poluição;
-  ícones simples ajudam (banco de dados, vetor/rede, gráfico, lupa/documento).
-- **Não usar** nomes de arquivo ou jargão de código; descrever conceitos.
-- **Destaques a enfatizar:** (a) o insight PU (positivos confiáveis × ruidoso);
-  (b) a etapa 8 (validação manual = rigor); (c) a etapa 11 (rito = prova
-  definitiva).
+Base bruta → limpeza → **separar o suspeito do comum** (PU + SBERT) →
+**treinar e calibrar o modelo** → **ranquear todos os "gerais"** →
+**validar com rigor** (precisão/recall) → **confirmar com LLM** →
+**provar no documento** (rito) → **entregar a ferramenta**.
+
+---
+
+## 5. Instruções de design (para a IA que vai gerar o slide)
+
+- **UM slide, 16:9, horizontal.**
+- **4 blocos/colunas** (as 4 fases) com etapas numeradas curtas; **setas** entre
+  blocos rotuladas com o que passa: *objetos limpos → modelo calibrado →
+  suspeitos priorizados*.
+- **Cores por fase:** A azul, B laranja, C verde, D vermelho.
+- **Hierarquia:** título; subtítulo com a ideia central (PU Learning); blocos;
+  rodapé com a base legal (Lei 14.133/2021 · Lei 5.194/66 · CONFEA — só CREA/ART).
+- Incluir, discretamente, os **termos técnicos-chave** por fase (ex.: “SBERT +
+  cosseno”, “K-Means/silhouette”, “8 classificadores + calibração”, “UMAP + grafo
+  k-NN”, “LLM Llama 3.1”, “ART/CREA · PyMuPDF · regex”).
+- **Tom:** acadêmico, limpo, legível de longe. Ícones simples (banco de dados,
+  vetor/rede, gráfico, lupa/documento). **Sem** nomes de arquivo.
+- **Enfatizar:** (a) o insight PU; (b) etapa 8 = validação/rigor; (c) etapa 11 =
+  rito/prova definitiva.
