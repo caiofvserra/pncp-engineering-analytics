@@ -1,10 +1,21 @@
 # Monitor de Subenquadramento de Engenharia — PNCP
 
-Sistema web de **monitoramento contínuo** de contratos "serviços gerais" que
-podem ser engenharia/obras (subenquadramento). O funcionário revisa cada caso
-suspeito, diz se **concorda** ou **discorda**, e essa decisão **retroalimenta o
-modelo** (aprendizado com humano no loop), com frequência de atualização
-configurável na própria interface.
+Sistema web que **espelha o pipeline do notebook** em abas operacionais e faz o
+monitoramento contínuo de contratos "serviços gerais" suspeitos de serem
+engenharia/obras (subenquadramento).
+
+**Fluxo (mesma ordem do notebook):**
+1. **Ranking** — saída do modelo treinado no notebook (probabilidade por objeto).
+2. **Triagem do objeto** — o revisor decide, pelo objeto, se é engenharia. A
+   decisão retroalimenta o modelo (aprendizado com humano no loop).
+3. **Análise de rito** (posterior, só para os confirmados) — o sistema **baixa o
+   edital/Termo de Referência** da licitação no PNCP, extrai o texto (PyMuPDF) e
+   detecta os marcadores do rito (ART/CREA, projeto básico, ABNT, planilha
+   orçamentária, BDI…). O revisor dá o veredito final: rito seguido (rótulo
+   incorreto) × **subenquadramento real** (rito não seguido).
+
+A triagem e o rito são etapas **separadas** justamente porque o rito é caro
+(baixar e ler PDFs) e só faz sentido para os casos já confirmados.
 
 ## Por que este desenho (barato, eficiente, sem quebras)
 

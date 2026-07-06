@@ -1,38 +1,35 @@
-"""Loop de aprendizado: aplica os feedbacks pendentes ao modelo online.
+"""Loop de aprendizado — aprende com a TRIAGEM do objeto (não com o rito).
 
-Regra de rótulo: o funcionário revisa um caso SUSPEITO de subenquadramento.
-  - concorda=1  → é engenharia mal enquadrada  → rótulo positivo (1)
-  - concorda=0  → é serviço comum de verdade    → rótulo negativo (0)
+  eh_eng=1 (revisor confirmou engenharia) -> rótulo positivo (1)
+  eh_eng=0 (revisor disse serviço comum)  -> rótulo negativo (0)
 
-Robusto: grava no histórico o resultado; nunca lança para o chamador.
-"""
+Robusto: nunca lança; troca atômica do modelo em model.incrementa()."""
 from . import db, model, ingest
 
 
-def precisa_retreinar() -> bool:
+def precisa_retreinar():
     cfg = db.get_config()
     if cfg.get("retrain_modo") == "por_feedbacks":
         try:
-            return db.n_feedbacks_novos() >= int(cfg.get("retrain_n_feedbacks", 25))
+            return db.n_triagens_novas() >= int(cfg.get("retrain_n_feedbacks", 20))
         except Exception:
             return False
-    return False   # modo "por_tempo" é disparado pelo agendador
+    return False
 
 
-def retreinar(motivo="manual") -> dict:
-    fbs = db.feedbacks_nao_aplicados()
-    if not fbs:
-        db.log_retrain(0, "vazio", f"{motivo}: sem feedback novo")
-        return {"ok": True, "aplicados": 0, "msg": "Sem feedback novo."}
-    textos = [f["objeto"] for f in fbs]
-    labels = [int(f["concorda"]) for f in fbs]
+def retreinar(motivo="manual"):
+    tri = db.triagens_nao_aplicadas()
+    if not tri:
+        db.evento("aprendizado", f"{motivo}: sem triagem nova")
+        return {"ok": True, "aplicados": 0, "msg": "Sem triagem nova."}
+    textos = [t["objeto"] for t in tri]
+    labels = [int(t["eh_eng"]) for t in tri]
     peso = float(db.get_config().get("peso_feedback", 3))
     n = model.incrementa(textos, labels, peso)
     if n < 0:
-        db.log_retrain(len(fbs), "erro", f"{motivo}: falha no incrementa()")
+        db.evento("aprendizado", f"{motivo}: falha no re-treino")
         return {"ok": False, "aplicados": 0, "msg": "Falha no re-treino (modelo anterior mantido)."}
-    db.marca_feedbacks_aplicados([f["id"] for f in fbs])
-    repont = ingest.repontuar_fila()
-    db.log_retrain(n, "ok", f"{motivo}: {n} feedbacks; fila repontuada ({repont})")
-    return {"ok": True, "aplicados": n, "repontuados": repont,
-            "msg": f"Modelo atualizado com {n} feedbacks; fila repontuada."}
+    db.marca_triagens_aplicadas([t["id"] for t in tri])
+    rep = ingest.repontuar()
+    db.evento("aprendizado", f"{motivo}: {n} triagens; ranking repontuado ({rep}).")
+    return {"ok": True, "aplicados": n, "msg": f"Modelo atualizado com {n} triagens; ranking repontuado."}
