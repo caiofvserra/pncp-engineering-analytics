@@ -1,0 +1,69 @@
+<!doctype html><html lang="pt-br"><head><meta charset="utf-8"><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:"Segoe UI",-apple-system,"Helvetica Neue",Arial,sans-serif;background:#fff;color:#1f2933;padding:46px 42px 40px;width:2360px}
+h1{font-size:32px;font-weight:800;color:#12303f}
+.sub{font-size:16px;color:#5b6b78;margin:10px 0 30px} .sub b{color:#12303f}
+.board{display:flex;align-items:stretch}
+.phase{display:flex;flex-direction:column;width:524px}
+.phead{color:#fff;font-weight:800;font-size:16px;letter-spacing:.4px;padding:12px 16px;border-radius:12px 12px 0 0;text-align:center}
+.pbody{flex:1;border-radius:0 0 14px 14px;padding:20px 18px 22px;display:flex;flex-direction:column;justify-content:flex-start}
+.card{background:#fff;border-radius:12px;padding:15px 17px;box-shadow:0 3px 10px rgba(20,40,60,.10);border:1px solid #eef1f4;margin:0}
+.chead{display:flex;align-items:center;gap:11px;margin-bottom:8px}
+.badge{color:#fff;font-weight:800;font-size:15px;min-width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.ctitle{font-size:17.5px;font-weight:700;color:#16232e;line-height:1.15}
+.cdesc{font-size:14.5px;color:#40505b;line-height:1.46}
+.vconn{text-align:center;margin:8px 0} .varr{color:#9aa7b1;font-size:22px}
+.hconn{display:flex;flex-direction:column;align-items:center;justify-content:center;width:118px;position:relative}
+.arrowline{position:absolute;top:50%;left:6px;right:6px;height:3px;background:#c3ccd4;border-radius:2px}
+.hlabel{position:relative;background:#fff;border:1px solid #d5dde3;color:#3f4f5b;font-size:12.5px;font-weight:600;font-style:italic;padding:3px 11px;border-radius:999px;margin-bottom:6px;z-index:2;text-align:center}
+.chev{position:relative;color:#8a97a1;font-size:42px;line-height:.6;z-index:2;background:#fff;padding:0 2px}
+.foot{margin-top:28px;font-size:13.5px;color:#7a8893} .foot b{color:#3a4a55}
+</style></head><body>
+<h1>Metodologia — Identificação de subenquadramento de engenharia no PNCP</h1>
+<div class="sub"><b>Ideia central (PU Learning):</b> os contratos rotulados como <b>engenharia</b> e <b>obras</b> são exemplos confiáveis; só o rótulo <b>serviços gerais</b> é ruidoso — e é nele que se escondem obras/engenharia mal classificadas. As setas indicam o que passa de uma fase à seguinte.</div>
+<div class="board"><div class="phase"><div class="phead" style="background:#2c5f8a">FASE A · COLETA E PREPARAÇÃO</div>
+      <div class="pbody" style="background:#eef4fa;border:1px solid #dbe7f3"><div class="card" style="border-left:6px solid #2c5f8a">
+          <div class="chead"><span class="badge" style="background:#2c5f8a">1</span>
+            <span class="ctitle">Coleta de dados</span></div>
+          <div class="cdesc">Baixa contratos do PNCP e separa obras, engenharia e serviços gerais pela categoria informada pelo órgão.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #2c5f8a">
+          <div class="chead"><span class="badge" style="background:#2c5f8a">2</span>
+            <span class="ctitle">Pré-processamento</span></div>
+          <div class="cdesc">Padroniza os objetos e remove os termos burocráticos repetidos que não distinguem o serviço.</div></div></div></div><div class="hconn"><div class="arrowline"></div>
+          <div class="hlabel">objetos padronizados</div><div class="chev">&#8250;</div></div><div class="phase"><div class="phead" style="background:#c8702a">FASE B · MODELAGEM (PU Learning)</div>
+      <div class="pbody" style="background:#fdf3ec;border:1px solid #fde3cc"><div class="card" style="border-left:6px solid #c8702a">
+          <div class="chead"><span class="badge" style="background:#c8702a">3</span>
+            <span class="ctitle">Representação semântica + filtro PU</span></div>
+          <div class="cdesc">Transforma cada objeto em vetor de significado e aproxima os “serviços gerais” do núcleo de engenharia, isolando os candidatos suspeitos.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #c8702a">
+          <div class="chead"><span class="badge" style="background:#c8702a">4</span>
+            <span class="ctitle">Agrupamento</span></div>
+          <div class="cdesc">Agrupa os candidatos por semelhança e mede a densidade de engenharia confirmada em cada grupo.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #c8702a">
+          <div class="chead"><span class="badge" style="background:#c8702a">5</span>
+            <span class="ctitle">Perfis de domínio (IA)</span></div>
+          <div class="cdesc">A IA descreve o vocabulário típico de engenharia e de não-engenharia, formando o contexto do domínio.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #c8702a">
+          <div class="chead"><span class="badge" style="background:#c8702a">6</span>
+            <span class="ctitle">Treino + calibração</span></div>
+          <div class="cdesc">Treina classificadores com os casos confiáveis e calibra a chance de um contrato ser engenharia.</div></div></div></div><div class="hconn"><div class="arrowline"></div>
+          <div class="hlabel">modelo treinado</div><div class="chev">&#8250;</div></div><div class="phase"><div class="phead" style="background:#5a8a2c">FASE C · DETECÇÃO E VALIDAÇÃO</div>
+      <div class="pbody" style="background:#f0f5e7;border:1px solid #e7f0d9"><div class="card" style="border-left:6px solid #5a8a2c">
+          <div class="chead"><span class="badge" style="background:#5a8a2c">7</span>
+            <span class="ctitle">Pontuação + ranqueamento</span></div>
+          <div class="cdesc">Pontua todos os “serviços gerais” e combina a probabilidade com a densidade do grupo, gerando o ranking de suspeitos.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #5a8a2c">
+          <div class="chead"><span class="badge" style="background:#5a8a2c">8</span>
+            <span class="ctitle">Validação manual</span></div>
+          <div class="cdesc">Uma amostra aleatória rotulada à mão mede a precisão real do modelo e define o ponto de corte.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #5a8a2c">
+          <div class="chead"><span class="badge" style="background:#5a8a2c">9</span>
+            <span class="ctitle">Visualização</span></div>
+          <div class="cdesc">Projeta os contratos em 2D e em rede de similaridade: os suspeitos aparecem colados à engenharia confirmada.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #5a8a2c">
+          <div class="chead"><span class="badge" style="background:#5a8a2c">10</span>
+            <span class="ctitle">Revisão por IA</span></div>
+          <div class="cdesc">A IA revisa os suspeitos do topo usando o contexto do domínio, descartando falsos positivos.</div></div></div></div><div class="hconn"><div class="arrowline"></div>
+          <div class="hlabel">suspeitos priorizados</div><div class="chev">&#8250;</div></div><div class="phase"><div class="phead" style="background:#b03030">FASE D · VERIFICAÇÃO E ENTREGA</div>
+      <div class="pbody" style="background:#f9ecec;border:1px solid #f6dcdc"><div class="card" style="border-left:6px solid #b03030">
+          <div class="chead"><span class="badge" style="background:#b03030">11</span>
+            <span class="ctitle">Análise do rito de engenharia</span></div>
+          <div class="cdesc">Abre o edital / Termo de Referência da licitação e verifica se o rito foi seguido (ART/CREA, projeto básico, normas ABNT): distingue subenquadramento real de rótulo apenas equivocado.</div></div><div class="vconn"><span class="varr">&#8595;</span></div><div class="card" style="border-left:6px solid #b03030">
+          <div class="chead"><span class="badge" style="background:#b03030">12</span>
+            <span class="ctitle">Consolidação e reuso</span></div>
+          <div class="cdesc">Reúne modelo, ranking e evidências num relatório e permite triar automaticamente novos contratos.</div></div></div></div></div>
+<div class="foot"><b>Fundamentação:</b> Lei 14.133/2021 · Lei 5.194/66 · resoluções do CONFEA (apenas engenharia — CREA/ART; arquitetura fora do escopo).</div>
+</body></html>

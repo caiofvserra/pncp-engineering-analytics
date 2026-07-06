@@ -272,8 +272,8 @@ def gerar_markdown():
                     f"- Classificação do LLM: {dist_txt}",
                     f"- **Subenquadramentos apontados** (engenharia/obras): "
                     f"{llm.get('n_subenquadramentos_apontados', 0)}",
-                    f"- Exigem ART/RRT segundo o LLM: "
-                    f"{llm.get('n_exigem_art_rrt', 0)}",
+                    f"- Exigem ART segundo o LLM: "
+                    f"{llm.get('n_exigem_art', 0)}",
                     "",
                     "O veredito do LLM entra como mais um sinal na consolidação "
                     "(conta junto com prob ML, marcadores em PDF, CNAE e aditivos)."]
@@ -473,12 +473,12 @@ GLOSSARIO = {
     "Lei 14.133/2021": "Nova Lei de Licitações. Define categorias 7 (obras), "
                          "8 (serviços gerais) e 9 (serviços de engenharia).",
     "Rito de engenharia": "Conjunto de exigências formais para um contrato de "
-                            "engenharia: ART/RRT, projeto básico/executivo, memorial "
+                            "engenharia: ART, projeto básico/executivo, memorial "
                             "descritivo, engenheiro responsável, normas ABNT NBR.",
     "ART": "Anotação de Responsabilidade Técnica — emitida pelo CREA. "
-            "Obrigatória para qualquer obra/serviço de engenharia.",
-    "RRT": "Registro de Responsabilidade Técnica — equivalente da ART para "
-            "arquitetos (CAU).",
+            "Obrigatória para qualquer obra/serviço de engenharia. "
+            "Escopo do estudo: apenas CREA/ART (engenharia); CAU/RRT "
+            "(arquitetura) ficam fora.",
     "Subenquadramento real": "Contrato de engenharia rotulado como 'serviços "
                                 "gerais' E que não seguiu o rito formal. Viola "
                                 "a Lei 14.133/2021.",

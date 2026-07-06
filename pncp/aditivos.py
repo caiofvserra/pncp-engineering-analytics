@@ -2,7 +2,7 @@
 Camada 3 — Termos aditivos (mudança de escopo).
 
 Insight central: contrato original rotulado 'geral' que recebeu aditivo
-com marcadores de engenharia (ART, RRT, "obra", etc.) é mudança de escopo
+com marcadores de engenharia (ART do CREA, "obra", etc.) é mudança de escopo
 indevida — a licitação original não seguiu o rito de engenharia mas a
 execução acabou incluindo trabalho que exigiria. Sinal jurídico forte.
 

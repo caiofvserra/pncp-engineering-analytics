@@ -10,7 +10,7 @@ Sua reflexão metodológica em 3 etapas:
 
   2. Verificação de rito (esta etapa)
      Para cada `obvio_engenharia`, checa se o processo seguiu o rito de
-     engenharia da Lei 14.133/2021 (ART/RRT, memorial descritivo, projeto
+     engenharia da Lei 14.133/2021 (ART do CREA, memorial descritivo, projeto
      básico/executivo, engenheiro responsável, norma ABNT NBR).
      - Se ≥2 sinais de rito → `rotulacao_incorreta_processo_ok`
        (rótulo errado, mas processo correto — não viola a lei)
@@ -71,15 +71,14 @@ PADROES_OBVIOS = [
     r"\bestrutura\s+(met[aá]lica|de\s+concreto\s+armado)\b",
     r"\bconcreto\s+armado\b",
     r"\balvenaria\s+estrutural\b",
-    # Documentos técnicos no objeto
-    r"\bprojeto\s+(b[aá]sico|executivo|arquitet[oô]nico|estrutural|"
+    # Documentos técnicos no objeto (apenas engenharia — sem arquitetônico)
+    r"\bprojeto\s+(b[aá]sico|executivo|estrutural|"
     r"el[eé]trico|hidr[oô]\w+)\b",
     r"\bmemorial\s+descritivo\b",
     r"\bplanilha\s+or[cç]ament[aá]ria\b",
     r"\bart\s+(do\s+)?crea\b",
     # Profissionais (se citados no objeto)
     r"\bengenharia\s+(civil|el[eé]trica|hidr[oô]\w+|sanit[aá]ria)\b",
-    r"\barquitet[oô]nico\s+e\s+complementares\b",
 ]
 PADROES_OBVIOS_RX = [re.compile(p, flags=re.IGNORECASE) for p in PADROES_OBVIOS]
 
@@ -105,7 +104,7 @@ def eh_obvio_engenharia(texto):
 # ── Sinais de rito de engenharia (Lei 14.133/2021) ───────────────────────────
 # Cada sinal corresponde a uma categoria de marcador em pncp/_marcadores.py
 # (mk_<NOME>_presente). Presença de ≥2 categorias = rito seguido.
-# Lei 6.496/1977 obriga ART; Lei 12.378/2010 obriga RRT.
+# Lei 6.496/1977 obriga ART do CREA para atividade de engenharia.
 from pncp._marcadores import MARCADORES_ENGENHARIA as _MARC
 
 SINAIS_RITO = tuple(f"mk_{nome}_presente" for nome in _MARC.keys())

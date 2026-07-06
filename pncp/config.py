@@ -67,7 +67,7 @@ TERMOS_ENGENHARIA = (
     "alvenaria", "telhado", "cobertura", "instalacao eletrica", "hidraulica",
     "saneamento", "esgoto", "agua", "iluminacao publica", "ponte", "viaduto",
     "calcada", "meio fio", "guia", "sarjeta", "muro", "passarela", "rampa",
-    "engenharia civil", "engenheiro", "art ", "rrt ", "crea", "cau",
+    "engenharia civil", "engenheiro", "art ", "crea",
     "memorial descritivo", "projeto executivo", "as built", "abnt nbr",
 )
 

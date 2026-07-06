@@ -236,9 +236,10 @@ públicos do PNCP (Portal Nacional de Contratações Públicas) entre três cate
 
 - "engenharia": contrato cujo objeto envolve serviço de engenharia
   (art. 6º XII da Lei 14.133/2021). Caracteriza-se por exigir profissional
-  inscrito no CREA/CAU, ART/RRT, projeto básico, memorial descritivo.
+  inscrito no CREA, ART, projeto básico, memorial descritivo.
   Exemplos: manutenção elétrica predial, instalação hidráulica, reforma
-  estrutural, drenagem, pavimentação, projeto arquitetônico.
+  estrutural, drenagem, pavimentação, projeto de engenharia.
+  ATENÇÃO: arquitetura (CAU/RRT) NÃO é engenharia para este estudo.
 
 - "obras": contrato cujo objeto envolve obra civil (art. 6º XX/XXI).
   Caracteriza-se por modificar estruturalmente o bem (construção, reforma
@@ -254,7 +255,7 @@ Responda APENAS no formato JSON estrito:
   "classe": "engenharia" | "obras" | "geral",
   "confianca": 0.0 a 1.0,
   "justificativa": "frase curta de até 30 palavras",
-  "exige_art_rrt": true | false,
+  "exige_art": true | false,
   "recomendacao": "string"
 }"""
 
@@ -273,7 +274,7 @@ def _montar_prompt(contrato):
         sinais.append(f"ML deu {prob:.0%} de prob de engenharia")
     if score_pdf > 0:
         sinais.append(f"PDFs anexados têm {score_pdf} categoria(s) de marcadores legais "
-                       f"(ART/RRT/CREA/Norma ABNT etc.)")
+                       f"(ART/CREA/Norma ABNT etc.)")
     if contrato.get("tem_cnae_eng"):
         sinais.append("Fornecedor tem CNAE de engenharia na Receita")
     if contrato.get("tem_mudanca_escopo"):
@@ -338,7 +339,7 @@ def validar_suspeitos(top_n=20, modelo="llama3.1", forcar=False):
 
     Returns:
       DataFrame com colunas adicionais: llm_classe, llm_confianca,
-      llm_justificativa, llm_exige_art_rrt, llm_recomendacao.
+      llm_justificativa, llm_exige_art, llm_recomendacao.
     """
     suspeitos_path = config.caminho(config.SUB_P9,
                                       "suspeitos_consolidados.parquet")
@@ -368,7 +369,7 @@ def validar_suspeitos(top_n=20, modelo="llama3.1", forcar=False):
             "llm_classe": resp.get("classe", "?"),
             "llm_confianca": float(resp.get("confianca", 0) or 0),
             "llm_justificativa": resp.get("justificativa", "")[:300],
-            "llm_exige_art_rrt": bool(resp.get("exige_art_rrt", False)),
+            "llm_exige_art": bool(resp.get("exige_art", False)),
             "llm_recomendacao": resp.get("recomendacao", "")[:300],
             "llm_resposta_bruta": (resp_txt or "")[:500],
         })
@@ -383,18 +384,18 @@ def validar_suspeitos(top_n=20, modelo="llama3.1", forcar=False):
     if not out.empty:
         cont = out["llm_classe"].value_counts().to_dict()
         n_subenq = int((out["llm_classe"].isin(["engenharia", "obras"])).sum())
-        n_rito = int(out["llm_exige_art_rrt"].sum())
+        n_rito = int(out["llm_exige_art"].sum())
         salvar_json({
             "n_avaliados": int(len(out)),
             "distribuicao_llm": cont,
             "n_subenquadramentos_apontados": n_subenq,
-            "n_exigem_art_rrt": n_rito,
+            "n_exigem_art": n_rito,
             "backend": BACKEND,
             "modelo": _modelo_efetivo(modelo),
         }, config.caminho("llm", "resumo.json"))
         print(f"\n[llm] resultado: {cont}")
         print(f"   subenquadramentos apontados pelo LLM: {n_subenq}/{len(out)}")
-        print(f"   exigem ART/RRT: {n_rito}/{len(out)}")
+        print(f"   exigem ART: {n_rito}/{len(out)}")
     return out
 
 
@@ -408,7 +409,7 @@ def mostrar(top_n=10):
     print(f"\n🤖 Validação LLM dos top {len(df)} suspeitos:\n")
     for _, r in df.iterrows():
         print(f"  • [{r['llm_classe']:>10s}] conf={r['llm_confianca']:.2f}  "
-              f"ART/RRT={'✓' if r['llm_exige_art_rrt'] else '✗'}")
+              f"ART={'✓' if r['llm_exige_art'] else '✗'}")
         print(f"    {r['numeroControlePNCP']}")
         print(f"    obj: {str(r['objeto'])[:100]}")
         print(f"    💡 {r['llm_justificativa']}")
