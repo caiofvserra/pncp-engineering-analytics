@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitor de Subenquadramento — PNCP</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<header>
+  <div class="logo">⚙</div>
+  <div>
+    <h1>Monitor de Subenquadramento de Engenharia</h1>
+    <div class="sub">Portal Nacional de Contratações Públicas · aprendizado contínuo com revisão humana</div>
+  </div>
+  <nav>
+    <button data-view="painel" class="ativo">Painel</button>
+    <button data-view="fila">Fila de revisão</button>
+    <button data-view="config">Configurações</button>
+    <button data-view="historico">Histórico</button>
+  </nav>
+</header>
+
+<main>
+  <!-- PAINEL -->
+  <section id="painel" class="view ativo">
+    <h2 class="titulo">Painel</h2>
+    <p class="legenda">Visão geral do monitoramento e do aprendizado do modelo.</p>
+    <div class="cards" id="cards"></div>
+    <div class="painel-cols">
+      <div class="bloco">
+        <h3>Suspeitos pendentes por tipo de engenharia</h3>
+        <div id="por-tipo"></div>
+      </div>
+      <div class="bloco">
+        <h3>Aprendizado com o revisor</h3>
+        <div id="feedback-resumo"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FILA -->
+  <section id="fila" class="view">
+    <h2 class="titulo">Fila de revisão</h2>
+    <p class="legenda">Contratos “serviços gerais” com maior suspeita de serem engenharia/obras.
+      Sua decisão retroalimenta o modelo.</p>
+    <div id="lista-fila"></div>
+  </section>
+
+  <!-- CONFIG -->
+  <section id="config" class="view">
+    <h2 class="titulo">Configurações</h2>
+    <p class="legenda">Defina a frequência de atualização do modelo e a ingestão de novos contratos.</p>
+    <div class="bloco form" id="form-config"></div>
+  </section>
+
+  <!-- HISTORICO -->
+  <section id="historico" class="view">
+    <h2 class="titulo">Histórico de atualizações</h2>
+    <p class="legenda">Cada re-treino do modelo e cada ingestão de contratos do PNCP.</p>
+    <table><thead><tr><th>Quando</th><th>Feedbacks</th><th>Status</th><th>Detalhe</th></tr></thead>
+      <tbody id="tbody-hist"></tbody></table>
+  </section>
+</main>
+
+<div id="toast"></div>
+<script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+dados_sistema/
+*.db
+*.db-wal
+*.db-shm
+*.joblib
+__pycache__/
+.venv/
