@@ -13,7 +13,7 @@ offline). Falhas de rede/leitura viram 'indeterminado', nunca derrubam o app.
 import json
 import re
 import requests
-from . import config
+from . import config, llm
 
 _HEAD = {"User-Agent": "Mozilla/5.0 (monitor-pncp)"}
 _RX_NCP = re.compile(r"^(?P<cnpj>\d{14})-(?P<tipo>\d+)-(?P<seq>\d+)/(?P<ano>\d{4})$")
@@ -36,25 +36,35 @@ MARCADORES = {
 }
 _RX_MARC = {k: [re.compile(p, re.IGNORECASE) for p in ps] for k, ps in MARCADORES.items()}
 
-# Trechos de TR embutidos para os contratos de demonstração (id -> texto).
+# Trechos de TR embutidos para a DEMONSTRAÇÃO (id -> texto do Termo de Referência).
 DEMO_TR = {
-    "c02": ("TERMO DE REFERÊNCIA — REFORMA E AMPLIAÇÃO DA UBS. Exige-se do "
-            "licitante a apresentação de projeto básico, memorial descritivo, "
-            "planilha orçamentária com composição de custos e BDI, cronograma "
-            "físico-financeiro, e a Anotação de Responsabilidade Técnica (ART) "
-            "do engenheiro responsável junto ao CREA. Serão observadas as normas "
-            "ABNT NBR aplicáveis."),
-    "c05": ("PROJETO BÁSICO — ELABORAÇÃO DE PROJETO ELÉTRICO. O responsável "
-            "técnico deverá recolher ART junto ao CREA e seguir as normas ABNT NBR "
-            "5410. Apresentar memorial descritivo e planilha orçamentária."),
+    "c01": ("TERMO DE REFERÊNCIA — RECAPEAMENTO ASFÁLTICO. Exige-se projeto "
+            "básico, planilha orçamentária com BDI, cronograma físico-financeiro "
+            "e ART do responsável técnico junto ao CREA. Normas ABNT NBR."),
+    "c02": ("TERMO DE REFERÊNCIA — REFORMA E AMPLIAÇÃO DA UBS. Exige-se projeto "
+            "básico, memorial descritivo, planilha orçamentária com composição de "
+            "custos e BDI, cronograma físico-financeiro e a Anotação de "
+            "Responsabilidade Técnica (ART) do engenheiro responsável junto ao "
+            "CREA. Observadas as normas ABNT NBR aplicáveis."),
+    "c05": ("PROJETO BÁSICO — PROJETO ELÉTRICO. O responsável técnico deverá "
+            "recolher ART junto ao CREA e seguir as normas ABNT NBR 5410. "
+            "Apresentar memorial descritivo e planilha orçamentária."),
+    "c09": ("TERMO DE REFERÊNCIA — REFORMA DE SANITÁRIOS E INSTALAÇÕES HIDRÁULICAS. "
+            "Requer projeto básico, planilha orçamentária e responsável técnico "
+            "com ART/CREA."),
+    "c12": ("TERMO DE REFERÊNCIA — MURO DE ARRIMO E DRENAGEM. Exige projeto "
+            "estrutural, ART/CREA, planilha orçamentária, cronograma físico-"
+            "financeiro e normas ABNT."),
     "c03": ("TERMO DE REFERÊNCIA — TROCA DE PISO E REVESTIMENTO. Objeto: "
-            "fornecimento de material e mão de obra para substituição do piso. "
-            "Pagamento conforme medição. Não há exigência de projeto nem de "
-            "responsável técnico registrado; contratação como serviço comum."),
-    "c11": ("TERMO DE REFERÊNCIA — MANUTENÇÃO DE VEÍCULOS DA FROTA. Serviços "
-            "mecânicos de manutenção preventiva e corretiva; peças e mão de obra. "
-            "Serviço comum, sem exigências de engenharia."),
+            "fornecimento de material e mão de obra para substituição do piso; "
+            "pagamento por medição. Sem exigência de projeto nem de responsável "
+            "técnico registrado — contratado como serviço comum."),
 }
+# Texto neutro (sem marcadores) para os demais contratos de demonstração.
+DEMO_TR_GENERICO = ("TERMO DE REFERÊNCIA. Contratação de prestação de serviços "
+    "conforme especificações; pagamento mensal por medição. Não há menção a "
+    "projeto básico, responsável técnico, ART ou normas ABNT.")
+
 
 
 def _decompor(ncp):
@@ -121,24 +131,28 @@ def _baixar_textos(info, max_docs):
 def analisar(contrato, max_docs=3):
     """Executa a análise de rito e devolve as evidências (dict)."""
     cid = contrato["id"]
-    if cid in DEMO_TR:                           # contrato de demonstração
-        texto = DEMO_TR[cid]
+    texto_demo = DEMO_TR.get(cid) or (DEMO_TR_GENERICO if contrato.get("origem") == "demo" else None)
+    if texto_demo is not None:                   # contrato de demonstração
+        texto = texto_demo
         achados, score = detectar_marcadores(texto)
+        vl = llm.analisar_rito(contrato["objeto"], texto)
         return {"ncp_compra": "(demonstração)", "n_docs": 1, "chars": len(texto),
                 "marcadores": json.dumps(achados, ensure_ascii=False),
-                "mk_score": score, "trecho": texto[:1500], "obtido": True}
+                "mk_score": score, "trecho": texto[:1500],
+                "llm_rito": (vl or {}).get("rito"), "obtido": True}
     info = _resolver_compra(cid)
     if not info:
         return {"ncp_compra": "", "n_docs": 0, "chars": 0, "marcadores": "[]",
                 "mk_score": 0, "trecho": "Não foi possível resolver a compra do "
-                "contrato no PNCP.", "obtido": False}
+                "contrato no PNCP.", "llm_rito": None, "obtido": False}
     ncp_compra = f'{info["cnpj"]}-1-{info["seq"]:06d}/{info["ano"]}'
     texto, n, msg = _baixar_textos(info, max_docs)
     if len(texto) < 200:
         return {"ncp_compra": ncp_compra, "n_docs": n, "chars": len(texto),
                 "marcadores": "[]", "mk_score": 0,
-                "trecho": f"Documento não obtido/ilegível ({msg}).", "obtido": False}
+                "trecho": f"Documento não obtido/ilegível ({msg}).", "llm_rito": None, "obtido": False}
     achados, score = detectar_marcadores(texto)
+    vl = llm.analisar_rito(contrato["objeto"], texto)
     return {"ncp_compra": ncp_compra, "n_docs": n, "chars": len(texto),
             "marcadores": json.dumps(achados, ensure_ascii=False), "mk_score": score,
-            "trecho": texto[:1500], "obtido": True}
+            "trecho": texto[:1500], "llm_rito": (vl or {}).get("rito"), "obtido": True}

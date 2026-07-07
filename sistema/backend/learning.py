@@ -1,35 +1,33 @@
-"""Loop de aprendizado — aprende com a TRIAGEM do objeto (não com o rito).
+"""Aprendizado com o humano no loop: a cada N triagens, RE-TREINA o classificador
+do sistema (positivos do órgão + amostra de gerais + rótulos humanos com peso) e
+RE-PONTUA a fila. Nunca lança para o chamador."""
+from . import db, classifier, pipeline
 
-  eh_eng=1 (revisor confirmou engenharia) -> rótulo positivo (1)
-  eh_eng=0 (revisor disse serviço comum)  -> rótulo negativo (0)
+_APLICADAS = "_triagens_aplicadas"   # marca simples no config
 
-Robusto: nunca lança; troca atômica do modelo em model.incrementa()."""
-from . import db, model, ingest
+
+def _n_desde_ultimo():
+    cfg = db.get_config()
+    return db.n_triagens() - int(cfg.get(_APLICADAS, "0") or 0)
 
 
 def precisa_retreinar():
     cfg = db.get_config()
     if cfg.get("retrain_modo") == "por_feedbacks":
         try:
-            return db.n_triagens_novas() >= int(cfg.get("retrain_n_feedbacks", 20))
+            return _n_desde_ultimo() >= int(cfg.get("retrain_n_feedbacks", 20))
         except Exception:
             return False
     return False
 
 
 def retreinar(motivo="manual"):
-    tri = db.triagens_nao_aplicadas()
-    if not tri:
-        db.evento("aprendizado", f"{motivo}: sem triagem nova")
-        return {"ok": True, "aplicados": 0, "msg": "Sem triagem nova."}
-    textos = [t["objeto"] for t in tri]
-    labels = [int(t["eh_eng"]) for t in tri]
-    peso = float(db.get_config().get("peso_feedback", 3))
-    n = model.incrementa(textos, labels, peso)
-    if n < 0:
-        db.evento("aprendizado", f"{motivo}: falha no re-treino")
-        return {"ok": False, "aplicados": 0, "msg": "Falha no re-treino (modelo anterior mantido)."}
-    db.marca_triagens_aplicadas([t["id"] for t in tri])
-    rep = ingest.repontuar()
-    db.evento("aprendizado", f"{motivo}: {n} triagens; ranking repontuado ({rep}).")
-    return {"ok": True, "aplicados": n, "msg": f"Modelo atualizado com {n} triagens; ranking repontuado."}
+    met = classifier.treinar()
+    if not met.get("ok"):
+        return {"ok": False, "msg": met.get("msg", "Falha no treino.")}
+    n_susp = pipeline.pontuar_gerais()
+    db.set_config({_APLICADAS: str(db.n_triagens())})
+    db.evento("aprendizado", f"{motivo}: modelo re-treinado; {n_susp} suspeitos na fila.")
+    return {"ok": True, "aplicados": met["n_humano"],
+            "msg": f"Modelo re-treinado ({met['n_pos']} pos / {met['n_neg']} neg, "
+                   f"+{met['n_humano']} humanos); fila repontuada."}

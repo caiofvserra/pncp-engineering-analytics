@@ -1,88 +1,68 @@
 # Monitor de Subenquadramento de Engenharia — PNCP
 
-Sistema web que **espelha o pipeline do notebook** em abas operacionais e faz o
-monitoramento contínuo de contratos "serviços gerais" suspeitos de serem
-engenharia/obras (subenquadramento).
+Sistema **autossuficiente** (não depende do notebook) para uso institucional:
+importa uma base de contratos já baixada, treina o próprio classificador,
+identifica “serviços gerais” que podem ser engenharia/obras, apoia a decisão
+com uma LLM (opcional), coleta a revisão humana, verifica o **rito documental**
+e **monitora o PNCP continuamente** (por padrão, 1× por mês).
 
-**Fluxo (mesma ordem do notebook):**
-1. **Ranking** — saída do modelo treinado no notebook (probabilidade por objeto).
-2. **Triagem do objeto** — o revisor decide, pelo objeto, se é engenharia. A
-   decisão retroalimenta o modelo (aprendizado com humano no loop).
-3. **Análise de rito** (posterior, só para os confirmados) — o sistema **baixa o
-   edital/Termo de Referência** da licitação no PNCP, extrai o texto (PyMuPDF) e
-   detecta os marcadores do rito (ART/CREA, projeto básico, ABNT, planilha
-   orçamentária, BDI…). O revisor dá o veredito final: rito seguido (rótulo
-   incorreto) × **subenquadramento real** (rito não seguido).
+> O notebook (`notebook/`) é a **pesquisa inicial** do TCC. Este sistema é o
+> **produto para operação** — faz tudo internamente.
 
-A triagem e o rito são etapas **separadas** justamente porque o rito é caro
-(baixar e ler PDFs) e só faz sentido para os casos já confirmados.
-
-## Por que este desenho (barato, eficiente, sem quebras)
-
-- **Aprendizado**, não "RL clássico": cada feedback é um rótulo. O modelo online
-  é um `SGDClassifier(log_loss)` sobre `HashingVectorizer` (sem vocabulário para
-  manter), atualizado por **`partial_fit`** — aprendizado *incremental* de custo
-  O(lote), **sem GPU e sem SBERT** no servidor. O SBERT pesado fica no notebook
-  (offline); aqui o modelo apenas **corrige** a probabilidade base com o feedback.
-- **Barato**: um único processo FastAPI + **SQLite** (arquivo, sem servidor de
-  banco) + frontend estático (sem etapa de build). Roda num laptop ou numa VM
-  mínima / free-tier.
-- **Sem quebras**: o feedback é **gravado antes** de qualquer coisa; o re-treino
-  faz **troca atômica** do arquivo do modelo (se falhar, mantém o anterior); a UI
-  funciona mesmo sem modelo (usa o score salvo). Sem o ranking do notebook, sobe
-  em **modo demonstração** com dados de exemplo.
-
-## Como o modelo é atualizado
-
-1. O funcionário responde na **Fila de revisão** (Concordo = é subenquadramento;
-   Discordo = serviço comum), opcionalmente marcando se o rito foi seguido e
-   escrevendo a justificativa.
-2. Ao atingir a política de frequência (**a cada N feedbacks** ou **por
-   intervalo de tempo**, definido em *Configurações*), o modelo é re-treinado
-   incrementalmente com os feedbacks novos (peso configurável).
-3. A fila é **repontuada** e reordenada com o modelo atualizado.
+## Etapas (todas dentro do sistema)
+1. **Importação** da base já baixada (parquet/csv com `objeto` e `categoria`).
+2. **Classificação** — o sistema treina um classificador próprio (TF-IDF +
+   Regressão Logística calibrada): positivos = contratos que o órgão já rotula
+   como engenharia/obras; negativos = amostra de “serviços gerais”. Sem GPU.
+3. **Veredito da LLM** (opcional) — dá uma segunda opinião no objeto.
+4. **Ranking** dos “serviços gerais” por probabilidade.
+5. **Triagem humana** — o revisor confirma/descarta; cada decisão **re-treina**
+   o classificador (aprendizado com humano no loop, frequência configurável).
+6. **Análise de rito** (posterior, só para os confirmados) — baixa o edital/TR
+   da licitação no PNCP, extrai o texto (PyMuPDF), detecta os marcadores
+   (ART/CREA, projeto básico, ABNT, planilha, BDI…) e, se a LLM estiver ativa,
+   lê o documento. O revisor dá o veredito: **rito seguido** (rótulo incorreto)
+   × **subenquadramento real** (rito ausente).
+7. **Monitoramento contínuo** — a cada N dias (30 = mensal) busca novos
+   contratos no PNCP, classifica e adiciona os suspeitos à triagem.
 
 ## Rodar
-
 ```bash
 cd sistema
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-uvicorn backend.main:app --reload
-# abra http://127.0.0.1:8000
+uvicorn backend.main:app --reload                      # http://127.0.0.1:8000
+```
+Sem arquivo de importação, sobe em **demonstração** (dados de exemplo).
+
+### Conectar aos dados já baixados
+```bash
+export PNCP_IMPORT_FILE="/caminho/contratos.parquet"   # colunas objeto, categoria[, orgao, valor, uf]
 ```
 
-### Conectar aos resultados do notebook (opcional)
-Aponte para o ranking gerado pela pesquisa para semear a fila com dados reais:
-```bash
-export PNCP_RANKING_CSV="/caminho/resultados_pesquisa/07_ranking_suspeitos.csv"
-```
-Sem essa variável, o sistema usa dados de demonstração (a UI funciona igual).
-Dados do sistema (banco, modelo) ficam em `PNCP_SISTEMA_DIR` (default
-`./dados_sistema`).
+### LLM (opcional)
+Em *Configurações → Apoio por LLM*: ative e informe o servidor Ollama
+(`http://127.0.0.1:11434`) e o modelo (ex.: `qwen2.5:7b`). Desligada, o sistema
+funciona só com o classificador + revisor.
 
 ## Arquitetura
-
 ```
 backend/
   main.py        API FastAPI + serve o frontend
-  db.py          SQLite (contratos, feedback, config, retrain_log)
-  model.py       modelo online incremental (Hashing + SGD, troca atômica)
-  learning.py    aplica feedbacks ao modelo (política de frequência)
-  ingest.py      semeadura (ranking/demo) + ingestão do PNCP
-  scheduler.py   APScheduler: re-treino por tempo + ingestão automática
+  db.py          SQLite (contratos, triagem, rito, config, eventos)
+  classifier.py  classificador próprio (TF-IDF + LogReg calibrada; treino atômico)
+  llm.py         apoio por LLM (Ollama), opcional e tolerante a falhas
+  pipeline.py    importação, classificação e ingestão contínua do PNCP
+  rito.py        resolve compra, baixa PDFs, marcadores + leitura por LLM
+  learning.py    re-treino a partir da triagem humana
+  scheduler.py   APScheduler: ingestão mensal + re-treino por tempo
   config.py      caminhos e padrões
-frontend/        index.html + styles.css + app.js  (HTML/JS puro, sem build)
+frontend/        Painel · Ranking · Triagem · Rito · Modelo & IA · Config · Histórico
 ```
 
-## Endpoints principais
-`GET /api/fila` · `POST /api/feedback` · `GET /api/stats` · `GET|POST /api/config`
-· `POST /api/retrain` · `POST /api/ingest` · `GET /api/historico`
-
-## Identidade visual
-Azul 800 `#0e1732` (institucional), Amarelo `#ffb001` (destaque/CTA), Azul 700
-`#15265c`, Azul 500 `#3662e2` (interativo), Azul claro `#6077b6`, Preto.
-
-> **Nota**: monitoramento é apoio à decisão. Um caso "confirmado" pela IA + revisor
-> ainda exige a verificação documental do rito (etapa do notebook) antes de
-> qualquer encaminhamento formal a órgão de controle.
+## Desenho (barato, sem quebras)
+- **Sem GPU**: classificador TF-IDF/LogReg (CPU, segundos). O SBERT/notebook não
+  é necessário em produção.
+- **Sem servidor de banco**: SQLite (arquivo).
+- **Robusto**: treino com troca atômica (falhou → mantém o anterior); rito e LLM
+  degradam com elegância; a UI funciona mesmo sem modelo/LLM/rede.

@@ -11,80 +11,90 @@
   <div class="logo">⚙</div>
   <div class="marca">
     <h1>Monitor de Subenquadramento de Engenharia</h1>
-    <p>PNCP · triagem do objeto → análise documental do rito → aprendizado contínuo</p>
+    <p>PNCP · sistema autossuficiente: classifica, verifica o rito e aprende continuamente</p>
   </div>
   <nav id="nav">
     <button data-v="painel" aria-current="true">Painel</button>
     <button data-v="ranking">Ranking</button>
     <button data-v="triagem">Triagem</button>
     <button data-v="rito">Análise de rito</button>
+    <button data-v="modelo">Modelo & IA</button>
     <button data-v="config">Configurações</button>
     <button data-v="historico">Histórico</button>
   </nav>
 </header>
 
 <main>
-  <!-- PAINEL -->
   <section id="painel" class="view on">
     <h2 class="h-view">Painel</h2>
-    <p class="sub">O fluxo segue o pipeline da pesquisa: o modelo ranqueia os suspeitos, o revisor
-      faz a <b>triagem do objeto</b> e, para os confirmados, o sistema faz a <b>análise documental
-      do rito</b> (baixa o edital/TR). Cada triagem retroalimenta o modelo.</p>
+    <p class="sub">O sistema faz tudo internamente: importa a base já baixada, treina o classificador,
+      pontua os “serviços gerais”, você faz a <b>triagem</b>, o sistema baixa os documentos e verifica o
+      <b>rito</b>, e a cada mês busca novos contratos no PNCP.</p>
     <div class="kpis" id="kpis"></div>
     <div class="duas">
-      <div class="painel-bloco"><h3>Suspeitos aguardando triagem, por tipo de engenharia</h3>
-        <div id="por-tipo"></div></div>
+      <div class="painel-bloco"><h3>Suspeitos aguardando triagem, por órgão</h3><div id="por-tipo"></div></div>
       <div class="painel-bloco"><h3>Funil de análise</h3><div id="funil"></div></div>
     </div>
   </section>
 
-  <!-- RANKING -->
   <section id="ranking" class="view">
     <h2 class="h-view">Ranking de suspeitos</h2>
-    <p class="sub">Saída do modelo treinado no notebook — todos os contratos “serviços gerais”
-      ordenados pela probabilidade de serem engenharia. Vá para a <b>Triagem</b> para revisá-los.</p>
+    <p class="sub">Todos os contratos “serviços gerais” ordenados pela probabilidade de serem
+      engenharia, segundo o classificador do sistema.</p>
     <div class="tabwrap"><table>
-      <thead><tr><th>#</th><th>Objeto</th><th>Órgão</th><th>Tipo</th><th>Valor</th>
-        <th>Suspeita</th><th>Status</th></tr></thead>
+      <thead><tr><th>#</th><th>Objeto</th><th>Órgão</th><th>Valor</th><th>Suspeita</th>
+        <th>IA</th><th>Status</th></tr></thead>
       <tbody id="tb-ranking"></tbody></table></div>
   </section>
 
-  <!-- TRIAGEM -->
   <section id="triagem" class="view">
     <h2 class="h-view">Triagem do objeto</h2>
-    <p class="sub">Etapa 1 (rápida): pelo objeto do contrato, decida se é engenharia. Ao confirmar,
-      o caso vai para a fila de <b>Análise de rito</b>. Sua decisão ensina o modelo.</p>
+    <p class="sub">Decida, pelo objeto, se é engenharia. Ao confirmar, o caso vai para a
+      <b>Análise de rito</b>. Cada decisão re-treina o classificador.</p>
     <div id="lista-triagem"></div>
   </section>
 
-  <!-- RITO -->
   <section id="rito" class="view">
     <h2 class="h-view">Análise de rito</h2>
-    <p class="sub">Etapa 2 (posterior): só para os contratos confirmados como engenharia. O sistema
-      baixa o edital / Termo de Referência da licitação e procura os marcadores do rito
-      (ART/CREA, projeto básico, ABNT, planilha orçamentária…). Você dá o veredito final.</p>
+    <p class="sub">Só para os confirmados: o sistema baixa o edital/Termo de Referência da licitação
+      e procura os marcadores do rito (ART/CREA, projeto básico, ABNT, planilha…). Você dá o veredito.</p>
     <div id="lista-rito"></div>
   </section>
 
-  <!-- CONFIG -->
+  <section id="modelo" class="view">
+    <h2 class="h-view">Modelo & IA</h2>
+    <p class="sub">Situação do classificador do sistema e do apoio por LLM.</p>
+    <div class="kpis" id="modelo-kpis"></div>
+    <div class="painel-bloco" style="max-width:640px">
+      <h3>Como funciona</h3>
+      <p class="sub" style="margin:0 0 14px">O classificador é treinado <b>dentro do sistema</b> com os
+        contratos que o próprio órgão rotula como engenharia/obras (positivos) e uma amostra de
+        “serviços gerais” (negativos), refinado pelas suas triagens. A LLM (opcional) dá um
+        <b>veredito de apoio</b> no objeto e ajuda a ler o documento do rito.</p>
+      <div class="linha">
+        <button class="btn amar" onclick="acao('/api/modelo/treinar','Modelo')">Re-treinar o modelo agora</button>
+        <button class="btn ghost" onclick="acao('/api/ingest','Ingestão')">Buscar novos contratos no PNCP</button>
+      </div>
+    </div>
+  </section>
+
   <section id="config" class="view">
     <h2 class="h-view">Configurações</h2>
-    <p class="sub">Frequência de aprendizado do modelo e monitoramento contínuo de novos contratos.</p>
+    <p class="sub">Aprendizado, monitoramento contínuo (mensal) e apoio por LLM.</p>
     <div class="painel-bloco form" id="form"></div>
   </section>
 
-  <!-- HISTORICO -->
   <section id="historico" class="view">
     <h2 class="h-view">Histórico</h2>
-    <p class="sub">Triagens, análises de rito, vereditos e atualizações do modelo.</p>
+    <p class="sub">Importação, classificação, triagens, rito, vereditos e ingestões.</p>
     <div class="tabwrap"><table>
       <thead><tr><th>Quando</th><th>Evento</th><th>Detalhe</th></tr></thead>
       <tbody id="tb-hist"></tbody></table></div>
   </section>
 </main>
 
-<footer>Um caso marcado como “subenquadramento real” significa que o objeto é engenharia e o
-  documento da licitação não trouxe o rito exigido — evidência para encaminhamento ao controle.</footer>
+<footer>“Subenquadramento real” = o objeto é engenharia e o documento da licitação não trouxe o
+  rito exigido — evidência para encaminhamento ao controle.</footer>
 <div id="toast" role="status" aria-live="polite"></div>
 <script src="/app.js"></script>
 </body>

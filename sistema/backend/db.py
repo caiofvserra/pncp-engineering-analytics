@@ -1,49 +1,49 @@
-"""Camada de dados SQLite. Modela o ciclo de vida que espelha o notebook:
+"""SQLite — sistema autossuficiente. Guarda TODOS os contratos (com a categoria
+declarada pelo órgão) e conduz os 'serviços gerais' pelo fluxo:
 
-  ranking → TRIAGEM (é engenharia?) → ANÁLISE DE RITO (baixa PDFs) → veredito
+  classificação → TRIAGEM (é engenharia?) → ANÁLISE DE RITO (baixa PDFs) → veredito
 
-status do contrato:
-  novo            -> aguardando triagem do objeto (etapa 8/10 do notebook)
-  triagem_nao     -> revisor disse que é serviço comum (fim; alimenta o modelo)
-  aguarda_rito    -> revisor confirmou engenharia -> vai para a fila de rito (etapa 11)
-  rito_seguido    -> documento tem o rito -> rótulo incorreto, mas processo correto
-  subenq_real     -> documento NÃO tem o rito -> subenquadramento real (o achado!)
-  rito_indeterminado -> não foi possível obter/ler o documento
+status:
+  referencia          -> contrato de engenharia/obras (positivo de treino; não revisado)
+  baixa               -> 'geral' com score abaixo do limiar (fora da fila)
+  novo                -> 'geral' suspeito, aguardando triagem
+  triagem_nao         -> revisor: serviço comum (negativo de treino)
+  aguarda_rito        -> revisor: engenharia -> fila de rito
+  rito_seguido        -> rito presente no documento (rótulo incorreto, processo ok)
+  subenq_real         -> rito ausente (SUBENQUADRAMENTO REAL)
+  rito_indeterminado  -> documento não obtido/ilegível
 """
 import sqlite3
 from contextlib import contextmanager
 from . import config
 
-
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS contratos (
-    id TEXT PRIMARY KEY, objeto TEXT NOT NULL, orgao TEXT, valor REAL,
-    tipo_eng TEXT, prob_base REAL, score REAL,
-    status TEXT DEFAULT 'novo', origem TEXT DEFAULT 'notebook',
+    id TEXT PRIMARY KEY, objeto TEXT NOT NULL, orgao TEXT, valor REAL, uf TEXT,
+    categoria TEXT DEFAULT 'geral',          -- engenharia | obras | geral
+    score REAL, status TEXT DEFAULT 'novo', origem TEXT DEFAULT 'import',
+    llm_classe TEXT, llm_motivo TEXT,
     criado_em TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_status_score ON contratos(status, score DESC);
+CREATE INDEX IF NOT EXISTS ix_categoria ON contratos(categoria);
 
 CREATE TABLE IF NOT EXISTS triagem (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    contrato_id TEXT NOT NULL, usuario TEXT, eh_eng INTEGER NOT NULL,
-    justificativa TEXT, aplicado_no_modelo INTEGER DEFAULT 0,
+    id INTEGER PRIMARY KEY AUTOINCREMENT, contrato_id TEXT NOT NULL, usuario TEXT,
+    eh_eng INTEGER NOT NULL, justificativa TEXT,
     criado_em TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS rito (
-    contrato_id TEXT PRIMARY KEY,
-    ncp_compra TEXT, n_docs INTEGER, chars INTEGER,
-    marcadores TEXT, mk_score INTEGER, trecho TEXT,
-    rito_seguido INTEGER, usuario TEXT,
-    criado_em TEXT DEFAULT (datetime('now'))
+    contrato_id TEXT PRIMARY KEY, ncp_compra TEXT, n_docs INTEGER, chars INTEGER,
+    marcadores TEXT, mk_score INTEGER, trecho TEXT, llm_rito TEXT,
+    rito_seguido INTEGER, usuario TEXT, criado_em TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS config (chave TEXT PRIMARY KEY, valor TEXT);
-
 CREATE TABLE IF NOT EXISTS eventos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    quando TEXT DEFAULT (datetime('now')), tipo TEXT, detalhe TEXT
+    id INTEGER PRIMARY KEY AUTOINCREMENT, quando TEXT DEFAULT (datetime('now')),
+    tipo TEXT, detalhe TEXT
 );
 """
 
@@ -66,7 +66,7 @@ def init():
             c.execute("INSERT OR IGNORE INTO config(chave,valor) VALUES(?,?)", (k, v))
 
 
-# ── config ───────────────────────────────────────────────────────────────
+# ── config / eventos ──────────────────────────────────────────────────────
 def get_config():
     with conn() as c:
         return {r["chave"]: r["valor"] for r in c.execute("SELECT * FROM config")}
@@ -78,15 +78,25 @@ def set_config(d):
             c.execute("UPDATE config SET valor=? WHERE chave=?", (str(v), k))
 
 
+def evento(tipo, detalhe=""):
+    with conn() as c:
+        c.execute("INSERT INTO eventos(tipo,detalhe) VALUES(?,?)", (tipo, detalhe))
+
+
+def eventos(limit=50):
+    with conn() as c:
+        return [dict(r) for r in c.execute(
+            "SELECT * FROM eventos ORDER BY id DESC LIMIT ?", (limit,))]
+
+
 # ── contratos ──────────────────────────────────────────────────────────
-def upsert_contratos(rows):
+def upsert(rows):
     with conn() as c:
         for r in rows:
-            c.execute(
-                """INSERT INTO contratos(id,objeto,orgao,valor,tipo_eng,prob_base,score,origem)
-                   VALUES(:id,:objeto,:orgao,:valor,:tipo_eng,:prob_base,:score,:origem)
-                   ON CONFLICT(id) DO UPDATE SET score=excluded.score,
-                     prob_base=excluded.prob_base""", r)
+            c.execute("""INSERT INTO contratos(id,objeto,orgao,valor,uf,categoria,
+                           score,status,origem) VALUES(:id,:objeto,:orgao,:valor,
+                           :uf,:categoria,:score,:status,:origem)
+                         ON CONFLICT(id) DO NOTHING""", r)
 
 
 def contrato(cid):
@@ -100,65 +110,81 @@ def set_status(cid, status):
         c.execute("UPDATE contratos SET status=? WHERE id=?", (status, cid))
 
 
+def set_score(cid, score, status=None):
+    with conn() as c:
+        if status:
+            c.execute("UPDATE contratos SET score=?,status=? WHERE id=?", (score, status, cid))
+        else:
+            c.execute("UPDATE contratos SET score=? WHERE id=?", (score, cid))
+
+
+def set_llm(cid, classe, motivo):
+    with conn() as c:
+        c.execute("UPDATE contratos SET llm_classe=?,llm_motivo=? WHERE id=?",
+                  (classe, motivo, cid))
+
+
 def n_contratos():
     with conn() as c:
         return c.execute("SELECT COUNT(*) n FROM contratos").fetchone()["n"]
 
 
-def listar(status=None, limit=50, offset=0, ordem="score DESC"):
-    q = "SELECT * FROM contratos"
-    a = []
+def listar(status=None, categoria=None, limit=50, offset=0, ordem="score DESC"):
+    q, a = "SELECT * FROM contratos WHERE 1=1", []
     if status:
-        q += " WHERE status IN (%s)" % ",".join("?" * len(status)); a += status
+        q += " AND status IN (%s)" % ",".join("?" * len(status)); a += status
+    if categoria:
+        q += " AND categoria IN (%s)" % ",".join("?" * len(categoria)); a += categoria
     q += f" ORDER BY {ordem} LIMIT ? OFFSET ?"; a += [limit, offset]
     with conn() as c:
         return [dict(r) for r in c.execute(q, a)]
 
 
-def pendentes_score():
-    """Contratos ainda na fila de triagem, para repontuar após re-treino."""
-    return listar(status=["novo"], limit=1000000)
+def gerais_para_pontuar():
+    with conn() as c:
+        return [dict(r) for r in c.execute(
+            "SELECT id,objeto FROM contratos WHERE categoria='geral' "
+            "AND status IN ('novo','baixa')")]
 
 
-# ── triagem ────────────────────────────────────────────────────────────
+# ── corpus de treino (positivos órgão + gerais amostra + rótulos humanos) ──
+def corpus_treino(max_neg_por_pos=3):
+    with conn() as c:
+        pos = [(r["objeto"], 1, 1.0) for r in c.execute(
+            "SELECT objeto FROM contratos WHERE categoria IN ('engenharia','obras')")]
+        n_neg = max(200, len(pos) * max_neg_por_pos)
+        neg = [(r["objeto"], 0, 1.0) for r in c.execute(
+            "SELECT objeto FROM contratos WHERE categoria='geral' "
+            "ORDER BY RANDOM() LIMIT ?", (n_neg,))]
+        peso = float(get_config().get("peso_feedback", 5))
+        hum = [(r["objeto"], int(r["eh_eng"]), peso) for r in c.execute(
+            "SELECT c.objeto, t.eh_eng FROM triagem t JOIN contratos c "
+            "ON c.id=t.contrato_id")]
+    return pos + neg + hum
+
+
+def n_triagens():
+    with conn() as c:
+        return c.execute("SELECT COUNT(*) n FROM triagem").fetchone()["n"]
+
+
+# ── triagem / rito ────────────────────────────────────────────────────────
 def add_triagem(cid, usuario, eh_eng, justificativa):
     with conn() as c:
         c.execute("INSERT INTO triagem(contrato_id,usuario,eh_eng,justificativa)"
                   " VALUES(?,?,?,?)", (cid, usuario, eh_eng, justificativa))
 
 
-def triagens_nao_aplicadas():
-    with conn() as c:
-        return [dict(r) for r in c.execute(
-            "SELECT t.*, c.objeto, c.valor FROM triagem t JOIN contratos c "
-            "ON c.id=t.contrato_id WHERE t.aplicado_no_modelo=0")]
-
-
-def marca_triagens_aplicadas(ids):
-    if not ids:
-        return
-    with conn() as c:
-        c.executemany("UPDATE triagem SET aplicado_no_modelo=1 WHERE id=?",
-                      [(i,) for i in ids])
-
-
-def n_triagens_novas():
-    with conn() as c:
-        return c.execute("SELECT COUNT(*) n FROM triagem WHERE aplicado_no_modelo=0"
-                         ).fetchone()["n"]
-
-
-# ── rito ────────────────────────────────────────────────────────────────
-def salva_rito(cid, dados):
+def salva_rito(cid, d):
     with conn() as c:
         c.execute("""INSERT INTO rito(contrato_id,ncp_compra,n_docs,chars,marcadores,
-                       mk_score,trecho) VALUES(?,?,?,?,?,?,?)
-                     ON CONFLICT(contrato_id) DO UPDATE SET
-                       ncp_compra=excluded.ncp_compra,n_docs=excluded.n_docs,
-                       chars=excluded.chars,marcadores=excluded.marcadores,
-                       mk_score=excluded.mk_score,trecho=excluded.trecho""",
-                  (cid, dados["ncp_compra"], dados["n_docs"], dados["chars"],
-                   dados["marcadores"], dados["mk_score"], dados["trecho"]))
+                       mk_score,trecho,llm_rito) VALUES(?,?,?,?,?,?,?,?)
+                     ON CONFLICT(contrato_id) DO UPDATE SET ncp_compra=excluded.ncp_compra,
+                       n_docs=excluded.n_docs,chars=excluded.chars,
+                       marcadores=excluded.marcadores,mk_score=excluded.mk_score,
+                       trecho=excluded.trecho,llm_rito=excluded.llm_rito""",
+                  (cid, d["ncp_compra"], d["n_docs"], d["chars"], d["marcadores"],
+                   d["mk_score"], d["trecho"], d.get("llm_rito")))
 
 
 def get_rito(cid):
@@ -167,38 +193,28 @@ def get_rito(cid):
         return dict(r) if r else None
 
 
-def veredito_rito(cid, rito_seguido, usuario):
+def veredito_rito(cid, seguido, usuario):
     with conn() as c:
-        c.execute("UPDATE rito SET rito_seguido=?, usuario=? WHERE contrato_id=?",
-                  (rito_seguido, usuario, cid))
+        c.execute("UPDATE rito SET rito_seguido=?,usuario=? WHERE contrato_id=?",
+                  (seguido, usuario, cid))
 
 
-# ── estatísticas / eventos ───────────────────────────────────────────────
+# ── estatísticas ──────────────────────────────────────────────────────────
 def stats():
     with conn() as c:
         g = lambda q, *a: c.execute(q, a).fetchone()[0]
         st = lambda s: g("SELECT COUNT(*) FROM contratos WHERE status=?", s)
-        subenq_val = g("SELECT COALESCE(SUM(valor),0) FROM contratos WHERE status='subenq_real'") or 0
         por_tipo = [dict(r) for r in c.execute(
-            "SELECT COALESCE(NULLIF(tipo_eng,''),'(sem tipo)') tipo, COUNT(*) n "
+            "SELECT COALESCE(NULLIF(orgao,''),'(sem órgão)') tipo, COUNT(*) n "
             "FROM contratos WHERE status='novo' GROUP BY tipo ORDER BY n DESC LIMIT 8")]
         return {
             "total": g("SELECT COUNT(*) FROM contratos"),
+            "referencia": g("SELECT COUNT(*) FROM contratos WHERE categoria IN ('engenharia','obras')"),
+            "gerais": g("SELECT COUNT(*) FROM contratos WHERE categoria='geral'"),
             "novos": st("novo"), "aguarda_rito": st("aguarda_rito"),
             "subenq_real": st("subenq_real"), "rito_seguido": st("rito_seguido"),
             "triagem_nao": st("triagem_nao"),
-            "rito_indeterminado": st("rito_indeterminado"),
-            "valor_subenq": subenq_val, "por_tipo": por_tipo,
-            "triagens_novas": n_triagens_novas(),
+            "valor_subenq": g("SELECT COALESCE(SUM(valor),0) FROM contratos WHERE status='subenq_real'") or 0,
+            "por_tipo": por_tipo, "triagens": g("SELECT COUNT(*) FROM triagem"),
+            "modelo": None,
         }
-
-
-def evento(tipo, detalhe=""):
-    with conn() as c:
-        c.execute("INSERT INTO eventos(tipo,detalhe) VALUES(?,?)", (tipo, detalhe))
-
-
-def eventos(limit=40):
-    with conn() as c:
-        return [dict(r) for r in c.execute(
-            "SELECT * FROM eventos ORDER BY id DESC LIMIT ?", (limit,))]
