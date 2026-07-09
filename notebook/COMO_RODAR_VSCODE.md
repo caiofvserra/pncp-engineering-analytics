@@ -54,6 +54,14 @@ Python do `.venv` que você criou.
   export PNCP_LLM_MODELO="qwen2.5:7b"     # ou llama3.1  (~5 GB)
   ollama pull qwen2.5:7b
   ```
+- **Sinal de alerta**: se o veredito (Etapa 10) rodar a dezenas de segundos por
+  contrato, o modelo não coube na GPU e está na RAM — a própria célula avisa
+  (checagem `ollama /api/ps`); troque para um modelo menor.
+- **Orçamento do veredito**: a Etapa 10 julga a fila em sessões de até
+  `PNCP_VEREDITO_HORAS` horas (padrão 8; `0` = sem teto), sempre dos suspeitos
+  mais críticos para os menos; re-executar continua de onde parou.
+- **Memória da LLM**: `PNCP_LLM_NUM_CTX` (padrão 4096) limita o contexto e o
+  consumo de memória por chamada.
 
 ## 6. Rodar
 "Run All". As etapas caras gravam cache em `resultados_pesquisa/_ckpt_*`; a
