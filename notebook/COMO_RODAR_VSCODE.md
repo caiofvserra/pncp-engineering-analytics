@@ -62,6 +62,13 @@ Python do `.venv` que você criou.
   mais críticos para os menos; re-executar continua de onde parou.
 - **Memória da LLM**: `PNCP_LLM_NUM_CTX` (padrão 4096) limita o contexto e o
   consumo de memória por chamada.
+- **OCR (Etapa 11)**: PDFs escaneados são lidos por OCR. No Colab a instalação
+  é automática; localmente instale o Tesseract com o idioma português
+  (`apt install tesseract-ocr tesseract-ocr-por` no Linux; no macOS
+  `brew install tesseract tesseract-lang`) e `pip install pytesseract pillow`.
+- **Classes do rito**: `subenquadramento_real` (rito ausente, confirmado por
+  dupla checagem da LLM), `rito_parcial` (evidência incompleta — fila de
+  revisão), `rotulacao_incorreta_processo_ok` e `indeterminado_*`.
 
 ## 6. Rodar
 "Run All". As etapas caras gravam cache em `resultados_pesquisa/_ckpt_*`; a
