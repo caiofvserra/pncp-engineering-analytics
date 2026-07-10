@@ -44,6 +44,19 @@ Alternativa sem variável: deixe a pasta `PNCP_TCC` ao lado do notebook.
 Abra o `.ipynb` → canto superior direito **"Select Kernel"** → escolha o
 Python do `.venv` que você criou.
 
+## 4b. Modelo de embeddings
+- Padrão: **`intfloat/multilingual-e5-large`** (~2,2 GB no 1º download; melhor
+  qualidade para similaridade em português). O prefixo `query:` exigido pelo
+  e5 é aplicado automaticamente pelo helper `embutir()`.
+- GPU fraca ou CPU: use um modelo menor antes de abrir o notebook:
+  ```bash
+  export PNCP_EMB_MODELO="paraphrase-multilingual-mpnet-base-v2"
+  ```
+- Na 1ª rodada após a troca, embeddings e treino são recomputados (caches
+  `_v4`; o cache de embeddings é separado por modelo). Os rótulos humanos
+  (`08_validacao.csv`), os vereditos da LLM e a análise de rito são
+  preservados e realimentam o novo treino automaticamente.
+
 ## 5. LLM (Ollama) local
 - Deixe o **app do Ollama aberto** (ou rode `ollama serve` num terminal). A
   célula da Etapa 0 detecta o Ollama já no ar e não tenta instalar nada.
