@@ -83,6 +83,15 @@ Python do `.venv` que você criou.
   dupla checagem da LLM), `rito_parcial` (evidência incompleta — fila de
   revisão), `rotulacao_incorreta_processo_ok` e `indeterminado_*`.
 
+## 5b. Ferramenta operacional (Etapa 13)
+- A Etapa 13 é **autossuficiente**: copie as células 13.1–13.5 para um
+  notebook vazio e distribua com o `pacote_reuso.joblib` (gerado na Etapa 12).
+- O operador roda célula a célula: envia o pacote, digita as datas
+  (`dd/mm/aaaa`) e a UF, opcionalmente liga a LLM (padrão leve `qwen2.5:7b`)
+  e escolhe a pasta de saída.
+- Sem LLM, o rito é decidido por marcadores: ≥ 2 = processo ok; 0–1 = fila
+  de revisão humana (nunca acusa subenquadramento sem juiz).
+
 ## 6. Rodar
 "Run All". As etapas caras gravam cache em `resultados_pesquisa/_ckpt_*`; a
 Etapa 8 **para** para você rotular `08_validacao.csv` (abra no Excel/planilha,
