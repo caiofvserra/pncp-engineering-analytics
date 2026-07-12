@@ -29,7 +29,8 @@ ambiente **`PNCP_TCC_DIR`** (se não definir, ele usa `./PNCP_TCC`):
 ```
 <PNCP_TCC_DIR>/
   dados/coleta/contratos.parquet      <- baixe do seu Google Drive e coloque aqui
-  resultados_pesquisa/                <- criada automaticamente (saídas + caches)
+  rodadas/rodada_NNN/                 <- criadas automaticamente (uma por rodada)
+  cache_compartilhado/                <- embeddings + PDFs (valem entre rodadas)
 ```
 Defina a variável (exemplos):
 ```bash
@@ -83,11 +84,18 @@ Python do `.venv` que você criou.
   dupla checagem da LLM), `rito_parcial` (evidência incompleta — fila de
   revisão), `rotulacao_incorreta_processo_ok` e `indeterminado_*`.
 
-## 4c. Rodadas e reaproveitamento
-- **Fluxo de rodadas**: renomeie `resultados_pesquisa` → `resultados_pesquisaN`
-  e rode tudo de novo. O notebook **herda automaticamente** da pasta irmã mais
-  recente: rótulos humanos (validação e teste-ouro), vereditos da LLM, análise
-  de rito, contexto aprendido e resultados da bancada — nada disso é refeito.
+## 4c. Rodadas e reaproveitamento (automático)
+- **Nada de renomear pasta**: cada rodada ganha a própria pasta
+  (`rodadas/rodada_001`, `002`, …) criada sozinha. Se a última rodada ainda
+  não terminou (queda de sessão, parada de rotulação), o "Executar tudo"
+  **retoma ela**; rodada concluída (Etapa 12 grava `_rodada_concluida.json`)
+  → a próxima execução abre uma rodada nova.
+- Controle manual: `PNCP_RODADA=nova` força rodada nova; `PNCP_RODADA=7`
+  reabre a `rodada_007`. Pastas do esquema antigo (`resultados_pesquisaN`)
+  são reconhecidas como fonte de herança.
+- **Herança automática** da rodada mais recente: rótulos humanos (validação
+  e teste-ouro), vereditos da LLM, análise de rito, contexto aprendido e
+  bancada — nada disso é refeito. Modelo/treino NUNCA atravessam rodadas.
 - **Caches caros compartilhados** (`cache_compartilhado/`): embeddings por
   modelo e PDFs baixados valem entre rodadas — renomear a pasta não re-gasta
   GPU nem re-baixa documentos (caches em pastas antigas são lidos onde estão).
