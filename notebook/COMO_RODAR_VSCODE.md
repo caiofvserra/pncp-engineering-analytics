@@ -83,6 +83,20 @@ Python do `.venv` que você criou.
   dupla checagem da LLM), `rito_parcial` (evidência incompleta — fila de
   revisão), `rotulacao_incorreta_processo_ok` e `indeterminado_*`.
 
+## 4c. Rodadas e reaproveitamento
+- **Fluxo de rodadas**: renomeie `resultados_pesquisa` → `resultados_pesquisaN`
+  e rode tudo de novo. O notebook **herda automaticamente** da pasta irmã mais
+  recente: rótulos humanos (validação e teste-ouro), vereditos da LLM, análise
+  de rito, contexto aprendido e resultados da bancada — nada disso é refeito.
+- **Caches caros compartilhados** (`cache_compartilhado/`): embeddings por
+  modelo e PDFs baixados valem entre rodadas — renomear a pasta não re-gasta
+  GPU nem re-baixa documentos (caches em pastas antigas são lidos onde estão).
+- O que recomputa por rodada (por desenho): filtro PU, clusters, treino,
+  re-treino, pontuação e UMAP (~30–60 min de GPU no total).
+- **Critério do limiar**: `PNCP_LIMIAR_METRICA=f2` troca a escolha do limiar
+  de F1 para F2 (recall pesa dobrado — coerente com a triagem em cascata);
+  a tabela sempre mostra F1 e F2 e os dois ótimos.
+
 ## 5a. Bancada de experimentos (Etapa 8b)
 - **Ligada por padrão** (todos os braços: congelados, TF-IDF, tabular-DL,
   fine-tuning e LLM zero-shot). Enquanto a validação/teste-ouro não estiverem
