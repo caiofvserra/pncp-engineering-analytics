@@ -84,11 +84,13 @@ Python do `.venv` que você criou.
   revisão), `rotulacao_incorreta_processo_ok` e `indeterminado_*`.
 
 ## 5a. Bancada de experimentos (Etapa 8b)
-- Desligada por padrão. Para rodar a comparação científica (encoders ×
-  estratégias × classificadores), defina `BENCH['rodar'] = True` na Etapa 0
-  **depois** de rotular a validação e o teste-ouro (Etapa 8).
-- Braços caros são opcionais: `BENCH['ft'] = True` liga o fine-tuning
-  (BERTimbau e e5+LoRA) e `BENCH['llm_zero_shot'] = True` o braço LLM pura.
+- **Ligada por padrão** (todos os braços: congelados, TF-IDF, tabular-DL,
+  fine-tuning e LLM zero-shot). Enquanto a validação/teste-ouro não estiverem
+  rotulados, a bancada é **adiada com aviso** — o "Executar tudo" não para.
+- É retomável em três níveis: cada execução vira uma linha em
+  `08b_bancada.csv`; os embeddings de cada encoder ficam em cache próprio; e
+  o braço LLM zero-shot salva checkpoint parcial a cada 25 respostas.
+- Para uma rodada rápida só do pipeline, desligue em `BENCH` (Etapa 0).
 - TabNet, TabPFN e FT-Transformer instalam sob demanda; se a biblioteca não
   estiver disponível, o braço é pulado com aviso (nada quebra).
 - Resultados em `08b_bancada.csv` (retomável linha a linha) + bootstrap
