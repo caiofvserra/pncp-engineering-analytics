@@ -83,6 +83,17 @@ Python do `.venv` que você criou.
   dupla checagem da LLM), `rito_parcial` (evidência incompleta — fila de
   revisão), `rotulacao_incorreta_processo_ok` e `indeterminado_*`.
 
+## 5a. Bancada de experimentos (Etapa 8b)
+- Desligada por padrão. Para rodar a comparação científica (encoders ×
+  estratégias × classificadores), defina `BENCH['rodar'] = True` na Etapa 0
+  **depois** de rotular a validação e o teste-ouro (Etapa 8).
+- Braços caros são opcionais: `BENCH['ft'] = True` liga o fine-tuning
+  (BERTimbau e e5+LoRA) e `BENCH['llm_zero_shot'] = True` o braço LLM pura.
+- TabNet, TabPFN e FT-Transformer instalam sob demanda; se a biblioteca não
+  estiver disponível, o braço é pulado com aviso (nada quebra).
+- Resultados em `08b_bancada.csv` (retomável linha a linha) + bootstrap
+  pareado na célula 8b.3.
+
 ## 5b. Ferramenta operacional (Etapa 13)
 - A Etapa 13 é **autossuficiente**: copie as células 13.1–13.5 para um
   notebook vazio e distribua com o `pacote_reuso.joblib` (gerado na Etapa 12).
