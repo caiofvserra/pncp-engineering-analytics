@@ -128,6 +128,17 @@ Python do `.venv` que você criou.
 - **Sem valor de contrato nas saídas**: a fiscalização verifica a presença
   de profissional habilitado (rito), não o montante — rankings, painéis e
   mapas ordenam por probabilidade/contagem.
+- **Lista para o CREA** (11.5): `12_LISTA_CREA_subenquadramentos.csv/.xlsx`
+  — uma linha por subenquadramento real, colunas claras (município, órgão,
+  objeto completo, tipo de engenharia, motivo da juíza, marcadores) e LINKS
+  diretos do PNCP para o contrato e o processo de compra, ordenada por
+  município → órgão.
+- **Contexto da juíza versionado**: as lições aprendidas na auditoria
+  (padrões de falsos positivos: contas de utilidade, seguros, limpeza…)
+  entram em toda chamada da LLM. Quando essas regras mudam (`CTX_VER`), os
+  vereditos `eng_obra` herdados são re-julgados automaticamente
+  (`PNCP_REJULGAR=tudo` re-julga tudo; `nada` mantém tudo), e os registros
+  de rito de contratos que deixarem de ser confirmados são descartados.
 - **Relatório Word** (12.2): `relatorio_final.docx` com todas as figuras em
   ordem, explicações e os números do relatório vivo.
 - **Anexos não-PDF**: o rito agora extrai DOCX (zip/XML) e imagens
