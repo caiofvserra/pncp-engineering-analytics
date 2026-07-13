@@ -132,9 +132,11 @@ Python do `.venv` que você criou.
 ## 5b. Ferramenta operacional (Etapa 13)
 - A Etapa 13 é **autossuficiente**: copie as células 13.1–13.5 para um
   notebook vazio e distribua com o `pacote_reuso.joblib` (gerado na Etapa 12).
-- O operador roda célula a célula: envia o pacote, digita as datas
+- O operador roda célula a célula: **seleciona o pacote no computador**
+  (janela de upload no Colab; janela do sistema no local), digita as datas
   (`dd/mm/aaaa`) e a UF, opcionalmente liga a LLM (padrão leve `qwen2.5:7b`)
-  e escolhe a pasta de saída.
+  e **escolhe a pasta de destino numa janela** (no Colab, o navegador baixa
+  um `.zip`). A ferramenta não usa o Drive.
 - Sem LLM, o rito é decidido por marcadores: ≥ 2 = processo ok; 0–1 = fila
   de revisão humana (nunca acusa subenquadramento sem juiz).
 - **Funciona SEM GPU**: em CPU a classificação usa lotes menores (só mais
