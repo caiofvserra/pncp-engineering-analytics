@@ -118,6 +118,17 @@ Python do `.venv` que você criou.
 - Resultados em `08b_bancada.csv` (retomável linha a linha) + bootstrap
   pareado na célula 8b.3.
 
+## 5a-bis. Saídas visuais e relatório
+- **Nuvens de palavras**: `01c_nuvens.png` (eng/obras × gerais) e
+  `12_nuvem_subenq.png` (vocabulário dos subenquadramentos).
+- **Mapa geográfico de SP** (11.7): bolhas por município em 4 camadas —
+  gerais, engenharia/obras, suspeitos e subenquadramentos reais —
+  `12_mapa_sp.png` (estático) e `12_mapa_sp.html` (interativo, hover).
+- **Relatório Word** (12.2): `relatorio_final.docx` com todas as figuras em
+  ordem, explicações e os números do relatório vivo.
+- **Anexos não-PDF**: o rito agora extrai DOCX (zip/XML) e imagens
+  (JPG/PNG via OCR) além de PDF — o despacho é pelo conteúdo do arquivo.
+
 ## 5b. Ferramenta operacional (Etapa 13)
 - A Etapa 13 é **autossuficiente**: copie as células 13.1–13.5 para um
   notebook vazio e distribua com o `pacote_reuso.joblib` (gerado na Etapa 12).
@@ -126,6 +137,11 @@ Python do `.venv` que você criou.
   e escolhe a pasta de saída.
 - Sem LLM, o rito é decidido por marcadores: ≥ 2 = processo ok; 0–1 = fila
   de revisão humana (nunca acusa subenquadramento sem juiz).
+- **Funciona SEM GPU**: em CPU a classificação usa lotes menores (só mais
+  lenta) e o veredito LLM é pulado automaticamente (force com
+  `PNCP_LLM_FORCAR=1`); o rito e o mapa não precisam de GPU.
+- A 13.5 também gera `mapa_subenquadramentos_<período>.html` (bolhas por
+  município, interativo) — útil para o CREA visualizar as concentrações.
 
 ## 6. Rodar
 "Run All". As etapas caras gravam cache em `resultados_pesquisa/_ckpt_*`; a
