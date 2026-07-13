@@ -121,9 +121,13 @@ Python do `.venv` que você criou.
 ## 5a-bis. Saídas visuais e relatório
 - **Nuvens de palavras**: `01c_nuvens.png` (eng/obras × gerais) e
   `12_nuvem_subenq.png` (vocabulário dos subenquadramentos).
-- **Mapa geográfico de SP** (11.7): bolhas por município em 4 camadas —
-  gerais, engenharia/obras, suspeitos e subenquadramentos reais —
-  `12_mapa_sp.png` (estático) e `12_mapa_sp.html` (interativo, hover).
+- **Mapa geográfico de SP** (11.7): choropleth por município com contornos
+  e números das GREs do CREA-SP (coloque `GRE.xlsx` na pasta base); botões
+  alternam as camadas (subenquadramentos × suspeitos × engenharia/obras) —
+  `12_mapa_sp.html` (interativo, hover) + 3 PNGs estáticos (um por camada).
+- **Sem valor de contrato nas saídas**: a fiscalização verifica a presença
+  de profissional habilitado (rito), não o montante — rankings, painéis e
+  mapas ordenam por probabilidade/contagem.
 - **Relatório Word** (12.2): `relatorio_final.docx` com todas as figuras em
   ordem, explicações e os números do relatório vivo.
 - **Anexos não-PDF**: o rito agora extrai DOCX (zip/XML) e imagens
