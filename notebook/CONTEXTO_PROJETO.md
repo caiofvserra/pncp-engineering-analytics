@@ -245,6 +245,26 @@ do CREA **não** tem coluna de valor.
   conclusões RQ3/RQ4 (histgb 0,667) estão contaminadas; a próxima rodada
   re-mede os braços saneados automaticamente.
 
+## 8b. Notebook FINAL enxuto (`subenquadramento_pncp.ipynb`)
+
+Derivado do notebook completo para a **rodada única e decisiva** (2026-07):
+- **Removido**: bancada científica inteira (Etapa 8b/RQ1–RQ8, células 39–42),
+  adoção automática do vencedor, config `BENCH`, sistema de **rodadas
+  automáticas + herança** (pasta única `PNCP_TCC/resultados`), re-julgamento
+  por versão de contexto herdado, flag `_rodada_concluida.json`, caches
+  legados de rodadas.
+- **Adicionado**: célula **8.4 baseline lexical** (TF-IDF 1–2g + logística
+  balanceada, mesmos rótulos de treino, limiar próprio na validação, métricas
+  no teste-ouro, gráfico `08c_baseline.png`); seção correspondente no Word.
+- **Corrigido**: `_ctxv` agora definido fora do `if` (no completo, primeira
+  execução sem CSV de veredito daria NameError).
+- **Mantido**: TODAS as visualizações, EDA, checkpoints/retomada intra-rodada,
+  caches de embeddings/PDFs, veredito/rito/consolidação/lista CREA/mapas/Word
+  e **Etapa 13 completa**. Sem QUALQUER menção a TCC/banca/autores no código.
+- Ordem das etapas revisada e mantida (dados → representação → rótulos fracos
+  → modelo → validação+baseline → julgamento → rito → produto).
+- O `pesquisa_subenquadramento.ipynb` (completo) permanece intacto no repo.
+
 ## 9. Estado atual e pendências
 
 - **Notebook pronto para a rodada final do TCC.** Checklist antes de rodar:

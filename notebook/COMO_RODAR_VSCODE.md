@@ -1,6 +1,19 @@
 # Rodar o notebook no VSCode (local)
 
-O mesmo `pesquisa_subenquadramento.ipynb` roda no Colab e localmente — ele
+> **Qual notebook usar?**
+> - **`subenquadramento_pncp.ipynb`** — versão FINAL enxuta, de **rodada
+>   única**: pasta fixa `PNCP_TCC/resultados`, sem sistema de
+>   rodadas/herança e sem a bancada de experimentos; inclui um baseline
+>   lexical (célula 8.4, TF-IDF × embeddings) e a Etapa 13 completa. Use
+>   esta para a execução decisiva.
+> - **`pesquisa_subenquadramento.ipynb`** — versão completa de pesquisa,
+>   com bancada (8b), rodadas automáticas e herança entre rodadas. Mantida
+>   como registro do processo.
+>
+> As seções abaixo valem para os dois (no novo, ignore o que fala de
+> rodadas/herança e bancada).
+
+O mesmo notebook roda no Colab e localmente — ele
 detecta o ambiente sozinho (`EM_COLAB`). No local, siga os passos abaixo.
 
 ## 1. Pré-requisitos
