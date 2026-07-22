@@ -113,7 +113,7 @@ na Etapa 8 para rotulação humana e retoma sozinho.
     LLM (marca `balanceado=1`, idempotente).
 
 ### Fase 4 — Julgamento e rito
-- **Célula 6 (contexto da juíza)**: `contexto_llm()` concatena partes
+- **Célula 6 (contexto da LLM)**: `contexto_llm()` concatena partes
   persistidas em `_ckpt_contexto_llm.json`, na ordem `_ORDEM_CTX`
   (exemplos_engenheiro, falsos_positivos, **licoes_rodada**, politica_eventos,
   armadilhas, vocabulario, tipos_engenharia, perfis, ...). **`CTX_LICOES`**
@@ -150,7 +150,7 @@ na Etapa 8 para rotulação humana e retoma sozinho.
   subenquadramentos.csv/.xlsx`** — 1 linha por subenquadramento real, ordenada
   por município→órgão (GRE), com **links diretos do PNCP** (contrato
   `pncp.gov.br/app/contratos/<cnpj>/<ano>/<seq>`; processo `/app/editais/...`),
-  objeto completo, tipo de engenharia, probabilidade, justificativa da juíza,
+  objeto completo, tipo de engenharia, probabilidade, justificativa da LLM,
   marcadores e documentos analisados.
 - **Célula 59 (mapa geográfico SP, 11.7)**: **choropleth municipal** (malha
   IBGE) com **contornos + números das GREs do CREA-SP**; botões alternam camadas
@@ -319,3 +319,35 @@ Derivado do notebook completo para a **rodada única e decisiva** (2026-07):
 _Arquivos-chave do repo_: `notebook/pesquisa_subenquadramento.ipynb` (pipeline),
 `notebook/COMO_RODAR_VSCODE.md` (execução), este `CONTEXTO_PROJETO.md` (handoff).
 _Branch_: `claude/identify-engineering-underclassification-nImeQ`.
+
+## Rubrica v2 (rodada corretiva)
+
+- **Motivação**: a lista final ao CREA continha falsos-positivos estruturais
+  (pintar lixeira, montar armários, divisória leve, estudo/TR para serviço
+  não-engenharia) — a rubrica de natureza era ampla e NÃO existia portão de
+  materialidade ("este objeto exige ART?").
+- **SYS_VER (célula do veredito)**: rubrica de 9 regras — natureza com regras
+  negativas (mobiliário ≠ estrutura; pintura de item isolado ≠ pintura
+  predial; TR para serviço não-eng ≠ projeto), objeto MISTO (qualquer parcela
+  de engenharia → fiscaliza), projeto exclusivamente arquitetônico (RRT/CAU)
+  → nao, situação contratual (prorrogação pura → nao; aditivo que introduz
+  engenharia → julga o escopo novo) e o campo novo `exige_art` no JSON.
+- **Materialidade no rito**: rito ausente + `exige_art=False` →
+  `revisao_pequeno_porte` (fila humana, FORA da lista CREA); a lista CREA
+  segue só com `subenquadramento_real` (exige ART + rito ausente + dupla
+  checagem). RRT/CAU não conta como rito de engenharia (nem como evidência).
+- **Fundamentos legais** (`fundamentos_legais` no contexto): resumo
+  operacional Lei 5.194/66, Lei 6.496/77 + Res. CONFEA 1.025/2009 e art. 6º
+  da Lei 14.133/2021 — entra em toda chamada da LLM (pesquisa e ferramenta).
+- **Banco de precedentes** (`12_banco_precedentes.csv/.npz` + dentro do
+  `pacote_reuso.joblib`): casos decididos (rótulo humano > rito verificado >
+  LLM conf≥0,8), um por texto normalizado, com embeddings.
+- **Etapa 13 v2**: pré-filtro por `limiar_recall` (ótimo F2; volumes pequenos
+  vão TODOS ao veredito), veredito com rubrica + fundamentos + top-8
+  precedentes por similaridade + votação de 3 amostras (maioria; divergência
+  sinalizada), materialidade no rito, roda em CPU (PNCP_LLM_PULAR=1 desliga).
+- **Limpeza automática**: célula nova (Etapa 0) detecta `10_veredito_llm.csv`
+  sem a coluna `exige_art` e apaga os artefatos das Etapas 10-12 (e curvas da
+  8) para regeração; embeddings, treino e PDFs são reaproveitados.
+- **Terminologia**: "juíza/juiz" removido de código e docs; CTX_VER =
+  `ctx-rubrica-v2`.

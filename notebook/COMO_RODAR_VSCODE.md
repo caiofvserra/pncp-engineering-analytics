@@ -93,9 +93,11 @@ Python do `.venv` que você criou.
   é automática; localmente instale o Tesseract com o idioma português
   (`apt install tesseract-ocr tesseract-ocr-por` no Linux; no macOS
   `brew install tesseract tesseract-lang`) e `pip install pytesseract pillow`.
-- **Classes do rito**: `subenquadramento_real` (rito ausente, confirmado por
-  dupla checagem da LLM), `rito_parcial` (evidência incompleta — fila de
-  revisão), `rotulacao_incorreta_processo_ok` e `indeterminado_*`.
+- **Classes do rito**: `subenquadramento_real` (rito ausente + objeto que
+  EXIGE ART + dupla checagem da LLM), `rito_parcial` (evidência incompleta
+  — fila de revisão), `revisao_pequeno_porte` (natureza de engenharia mas
+  sem exigência de ART — fila de revisão), `rotulacao_incorreta_processo_ok`
+  e `indeterminado_*`.
 
 ## 4c. Rodadas e reaproveitamento (automático)
 - **Nada de renomear pasta**: cada rodada ganha a própria pasta
@@ -143,10 +145,10 @@ Python do `.venv` que você criou.
   mapas ordenam por probabilidade/contagem.
 - **Lista para o CREA** (11.5): `12_LISTA_CREA_subenquadramentos.csv/.xlsx`
   — uma linha por subenquadramento real, colunas claras (município, órgão,
-  objeto completo, tipo de engenharia, motivo da juíza, marcadores) e LINKS
+  objeto completo, tipo de engenharia, justificativa da LLM, marcadores) e LINKS
   diretos do PNCP para o contrato e o processo de compra, ordenada por
   município → órgão.
-- **Contexto da juíza versionado**: as lições aprendidas na auditoria
+- **Contexto da LLM versionado**: as lições aprendidas na auditoria
   (padrões de falsos positivos: contas de utilidade, seguros, limpeza…)
   entram em toda chamada da LLM. Quando essas regras mudam (`CTX_VER`), os
   vereditos `eng_obra` herdados são re-julgados automaticamente
@@ -166,7 +168,7 @@ Python do `.venv` que você criou.
   e **escolhe a pasta de destino numa janela** (no Colab, o navegador baixa
   um `.zip`). A ferramenta não usa o Drive.
 - Sem LLM, o rito é decidido por marcadores: ≥ 2 = processo ok; 0–1 = fila
-  de revisão humana (nunca acusa subenquadramento sem juiz).
+  de revisão humana (nunca acusa subenquadramento sem veredito).
 - **Funciona SEM GPU**: em CPU a classificação usa lotes menores (só mais
   lenta) e o veredito LLM é pulado automaticamente (force com
   `PNCP_LLM_FORCAR=1`); o rito e o mapa não precisam de GPU.
